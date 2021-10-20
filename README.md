@@ -2,6 +2,8 @@
 Grail, A simple formant speech synthesizer, built for portability
 This is the rust version
 
+The goal of this synthesizer is to be as simple as possible, and easy to port to C and other languages if needed (I'll make a C port when this one is in a more complete state)
+
 Still heavy WIP
 
 # License
