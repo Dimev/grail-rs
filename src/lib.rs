@@ -160,9 +160,43 @@ impl SynthesisElem {
 
     // make a new one with the default sample rate, and unit gain
 
-    // blend synthesis elements
+    /// blend between this synthesis element and another one
+    #[inline]
+    pub fn blend(self, other: Self, alpha: f32) -> Self {
+        Self {
+            frequency: self.frequency * (1.0 - alpha) + other.frequency * alpha,
+            formant_frequencies: self
+                .formant_frequencies
+                .blend(other.formant_frequencies, alpha),
+            formant_bandwidths: self
+                .formant_bandwidths
+                .blend(other.formant_bandwidths, alpha),
+            formant_amplitudes: self
+                .formant_amplitudes
+                .blend(other.formant_amplitudes, alpha),
+            antiresonator_frequency: self.antiresonator_frequency * (1.0 - alpha)
+                + other.antiresonator_frequency * alpha,
+            antiresonator_bandwidth: self.antiresonator_bandwidth * (1.0 - alpha)
+                + other.antiresonator_bandwidth * alpha,
+            antiresonator_amplitude: self.antiresonator_amplitude * (1.0 - alpha)
+                + other.antiresonator_amplitude * alpha,
+            softness: self.softness * (1.0 - alpha) + other.softness * alpha,
+        }
+    }
 
-    // resample one
+    /// resample the synthesis element to a new sample rate
+    #[inline]
+    pub fn resample(self, old_sample_rate: u32, new_sample_rate: u32) -> Self {
+        // scale factor for the sample rate
+        let scale = old_sample_rate as f32 / new_sample_rate as f32;
+
+        Self {
+            frequency: self.frequency * scale,
+            formant_frequencies: self.formant_frequencies.mul(Array::splat(scale)),
+            antiresonator_frequency: self.antiresonator_frequency * scale,
+            ..self // this means fill in the rest of the struct with self
+        }
+    }
 }
 
 // next we'll want to synthesize some audio

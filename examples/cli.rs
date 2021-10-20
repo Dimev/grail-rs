@@ -50,11 +50,7 @@ fn main() {
     // and play it back, if needed
     if play_sound {
         stream_handle
-            .play_raw(SamplesBuffer::new(
-                1,
-                sample_rate,
-                generated_audio.clone(),
-            ))
+            .play_raw(SamplesBuffer::new(1, sample_rate, generated_audio.clone()))
             .expect("failed to play audio");
     }
 }
