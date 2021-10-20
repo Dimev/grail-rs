@@ -25,6 +25,7 @@ pub struct Array {
 impl Array {
 
 	/// makes a new Array from a given array 
+	#[inline]
 	pub fn new(arr: [f32; NUM_FORMANTS]) -> Self {
 		Self { x: arr }
 	}
@@ -33,6 +34,7 @@ impl Array {
 	// not using the OP traits here to keep it simple
 
 	/// adds two arrays together
+	#[inline]
 	pub fn add(self, other: Self) -> Self {
 		let mut res = self;
 		for i in 0..NUM_FORMANTS {
@@ -42,6 +44,7 @@ impl Array {
 	}
 
 	/// subtracts an array from another
+	#[inline]
 	pub fn sub(self, other: Self) -> Self {
 		let mut res = self;
 		for i in 0..NUM_FORMANTS {
@@ -51,6 +54,7 @@ impl Array {
 	}
 
 	/// multiplies two arrays together
+	#[inline]
 	pub fn mul(self, other: Self) -> Self {
 		let mut res = self;
 		for i in 0..NUM_FORMANTS {
@@ -60,6 +64,7 @@ impl Array {
 	}
 
 	/// divides one array with another
+	#[inline]
 	pub fn div(self, other: Self) -> Self {
 		let mut res = self;
 		for i in 0..NUM_FORMANTS {
@@ -69,11 +74,13 @@ impl Array {
 	}
 
 	/// sums all elements in an array together
+	#[inline]
 	pub fn sum(self) -> f32 {
 		self.x.iter().sum()
 	}
 
 	/// blend two arrays, based on some blend value
+	#[inline]
 	pub fn blend(self, other: Self, alpha: f32) -> Self {
 		let mut res = self;
 		for i in 0..NUM_FORMANTS {
@@ -88,11 +95,10 @@ impl Array {
 
 /// generates a random float, and changes the state after doing so
 #[inline]
-pub fn random_float(state: &mut u32) -> f32 {
+pub fn random_f32(state: &mut u32) -> f32 {
     // here we change the state with a regular integer rng
     // This is the lehmer random number generator: https://en.wikipedia.org/wiki/Lehmer_random_number_generator
     // 16807 here is a magic number. In theory this could be any coprime, but there are some numbers that work better
-    // 48271 is also such a number
     *state = state.wrapping_mul(16807).wrapping_add(1);
 
     // https://experilous.com/1/blog/post/perfect-fast-random-floating-point-numbers
@@ -176,6 +182,9 @@ pub struct Synthesize<T: Iterator<Item=SynthesisElem>> {
 	seed: u32,
 
 }
+
+// TODO: voice here? 
+// needed because we probably want jitter to read it's parameters from voice, but we can do that later if really needed, and just pass voice.param_a in there
 
 // next up, implement iterator for the synthesizer, which takes care of synthesizing sound (in samples) from synthesis elements
 
