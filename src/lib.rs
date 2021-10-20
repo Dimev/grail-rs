@@ -6,7 +6,7 @@
 
 /// default sample rate all voices use
 /// Resampling to a different sample rate is possible
-pub const DEFAULT_SAMPLE_RATE: usize = 44100;
+pub const DEFAULT_SAMPLE_RATE: u32 = 44100;
 
 /// the number of formants to synthesize
 pub const NUM_FORMANTS: usize = 12;
@@ -246,7 +246,7 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         // and now, do the antiresonator on the summed value
 
         // and return the found value
-        Some(0.0)
+        Some(x.sum())
     }
 }
 
