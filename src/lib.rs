@@ -226,7 +226,7 @@ pub struct Synthesize<T: Iterator<Item = SynthesisElem>> {
 impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
     type Item = f32;
 
-    fn next(&mut self) -> Option<f32> {
+    fn next(&mut self) -> Option<Self::Item> {
         // get the item from the underlying iterator, or return None if we can't
         let elem = self.iter.next()?;
 
@@ -402,22 +402,95 @@ pub struct Jitter<T: Iterator<Item = SynthesisElem>> {
     freq_noise: ValueNoise,
 
     /// noise for the formant frequency
-    formant_noise: ArrayValueNoise,
+    formant_freq_noise: ArrayValueNoise,
 
     /// noise for the formant amplitude
-    amplitude_noise: ArrayValueNoise,
-    // nasal frequency
+    formant_amp_noise: ArrayValueNoise,
 
-    // nasal amplitude
+    /// nasal frequency
+    nasal_freq_noise: ValueNoise,
 
-    // noise frequency
+    /// nasal amplitude
+    nasal_amp_noise: ValueNoise,
 
-    // frequency deviation
+    /// noise frequency
+    frequency: f32,
 
-    // formant deviation
+    /// frequency deviation
+    delta_frequency: f32,
 
-    // amplitude deviation
+    /// formant deviation, also includes antiresonator/nasal
+    delta_formant_freq: f32,
+
+    /// amplitude deviation, also includes antiresonator/nasal
+    delta_amplitude: f32,
 }
+
+impl<T: Iterator<Item = SynthesisElem>> Iterator for Jitter<T> {
+    type Item = SynthesisElem;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // get the next element from the underlying iterator
+        let mut elem = self.iter.next()?;
+
+        // gather all next noises
+        let freq = self.freq_noise.next(self.frequency);
+        let formant_freq = self.formant_freq_noise.next(self.frequency);
+        let formant_amp = self.formant_amp_noise.next(self.frequency);
+        let nasal_freq = self.nasal_freq_noise.next(self.frequency);
+        let nasal_amp = self.nasal_amp_noise.next(self.frequency);
+
+        // change them in the element
+        elem.frequency += freq * self.delta_frequency;
+        elem.formant_freq = elem
+            .formant_freq
+            .add(formant_freq.mul(Array::splat(self.delta_formant_freq)));
+        // we don't want it to get *louder*, so make sure it only becomes softer by doing (2 - [-1, 1]) / 2, which results in [0, 1]
+        elem.formant_amp = elem.formant_amp.add(
+            Array::splat(2.0)
+                .sub(formant_amp)
+                .mul(Array::splat(self.delta_amplitude * 0.5)),
+        );
+        elem.nasal_freq += nasal_freq * self.delta_formant_freq;
+        // same here
+        elem.nasal_amp += (2.0 - nasal_amp) * self.delta_amplitude * 0.5;
+
+        // and return the modified element
+        Some(elem)
+    }
+}
+
+// and we want to be able to easily make the jitter iterator
+pub trait IntoJitter
+where
+    Self: IntoIterator<Item = SynthesisElem> + Sized,
+{
+    /// creates a new synthesizer from this iterator, TODO: RELPLACE WITH GATHERING PARAMS FROM SPEAKER?
+    fn jitter(
+        self,
+        mut seed: u32,
+        frequency: f32,
+        delta_frequency: f32,
+        delta_formant_frequency: f32,
+        delta_amplitude: f32,
+    ) -> Jitter<Self::IntoIter> {
+        Jitter {
+            iter: self.into_iter(),
+            freq_noise: ValueNoise::new(&mut seed),
+            formant_freq_noise: ArrayValueNoise::new(&mut seed),
+            formant_amp_noise: ArrayValueNoise::new(&mut seed),
+            nasal_freq_noise: ValueNoise::new(&mut seed),
+            nasal_amp_noise: ValueNoise::new(&mut seed),
+            frequency,
+            delta_frequency,
+            delta_amplitude,
+            delta_formant_freq: delta_formant_frequency,
+        }
+    }
+}
+
+// implement it for anything that can become the right iterator
+impl<T> IntoJitter for T where T: IntoIterator<Item = SynthesisElem> + Sized {}
 
 // Here's how it will work
 // synthesizer iterator to generate sound
