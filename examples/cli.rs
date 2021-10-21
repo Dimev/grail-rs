@@ -22,7 +22,7 @@ fn main() {
     let mut play_sound = true;
 
     // check what we need to do
-    if args.contains(&"-h".into()) || args.contains(&"--help".into()) {
+    if args.contains(&"-h".into()) || args.contains(&"--help".into()) || args.len() == 1 {
         // print help menu
         // grail-rs version
         println!("Grail-rs version {}", 0);
@@ -36,6 +36,33 @@ fn main() {
         // stop
         return;
     }
+
+    // figure out what to say, this is anything without a switch in front of it
+    let to_say = args
+         // drop the arg giving the command this was run with
+        .windows(2) // get the potential flag and the thing following it
+        .skip(1)
+		.filter_map(|x| {
+            match x {
+                [a, b] => {
+                    // if a is not a flag, include both
+                    if a.starts_with("-") {
+                        None
+                    } else {
+                        Some(a)
+                    }
+                }
+                [a] => {
+                    // if this is not a flag, we should say this
+                    if a.starts_with("-") {
+                        None
+                    } else {
+                        Some(a)
+                    }
+                }
+                _ => None,
+            }
+        });
 
     // display them
     println!("Args: {:?}", args);
