@@ -17,6 +17,7 @@ pub const NUM_VOICED_FORMANTS: usize = 8;
 // next, let's make a struct to help storing arrays, and do operations on them
 
 /// Array, containing NUM_FORMANTS elements. Used to store formants
+#[derive(Copy, Clone, Debug)]
 pub struct Array {
     /// inner array
     pub x: [f32; NUM_FORMANTS],
@@ -127,27 +128,28 @@ pub fn random_f32(state: &mut u32) -> f32 {
 // we'll want a way to represent what to synthesize
 
 /// synthesis element, describes what to synthesize
+#[derive(Copy, Clone, Debug)]
 pub struct SynthesisElem {
     /// base frequency, normalized to sample rate
     pub frequency: f32,
 
     /// formant frequencies, normalized to sample rate
-    pub formant_frequencies: Array,
+    pub formant_freq: Array,
 
     /// formant bandwidths, normalized to sample rate
-    pub formant_bandwidths: Array,
+    pub formant_bw: Array,
 
     /// formant amplitudes. If these sum up to one, the output amplitude will also be one
-    pub formant_amplitudes: Array,
+    pub formant_amp: Array,
 
     /// antiresonator frequency, normalized to sample rate
-    pub antiresonator_frequency: f32,
+    pub nasal_freq: f32,
 
     /// antiresonator bandwidth
-    pub antiresonator_bandwidth: f32,
+    pub nasal_bw: f32,
 
     /// antiresonator amplitude
-    pub antiresonator_amplitude: f32,
+    pub nasal_amp: f32,
 
     /// voice softness, 0 is saw, 1 is sine
     pub softness: f32,
@@ -165,21 +167,12 @@ impl SynthesisElem {
     pub fn blend(self, other: Self, alpha: f32) -> Self {
         Self {
             frequency: self.frequency * (1.0 - alpha) + other.frequency * alpha,
-            formant_frequencies: self
-                .formant_frequencies
-                .blend(other.formant_frequencies, alpha),
-            formant_bandwidths: self
-                .formant_bandwidths
-                .blend(other.formant_bandwidths, alpha),
-            formant_amplitudes: self
-                .formant_amplitudes
-                .blend(other.formant_amplitudes, alpha),
-            antiresonator_frequency: self.antiresonator_frequency * (1.0 - alpha)
-                + other.antiresonator_frequency * alpha,
-            antiresonator_bandwidth: self.antiresonator_bandwidth * (1.0 - alpha)
-                + other.antiresonator_bandwidth * alpha,
-            antiresonator_amplitude: self.antiresonator_amplitude * (1.0 - alpha)
-                + other.antiresonator_amplitude * alpha,
+            formant_freq: self.formant_freq.blend(other.formant_freq, alpha),
+            formant_bw: self.formant_bw.blend(other.formant_bw, alpha),
+            formant_amp: self.formant_amp.blend(other.formant_amp, alpha),
+            nasal_freq: self.nasal_freq * (1.0 - alpha) + other.nasal_freq * alpha,
+            nasal_bw: self.nasal_bw * (1.0 - alpha) + other.nasal_bw * alpha,
+            nasal_amp: self.nasal_amp * (1.0 - alpha) + other.nasal_amp * alpha,
             softness: self.softness * (1.0 - alpha) + other.softness * alpha,
         }
     }
@@ -192,8 +185,8 @@ impl SynthesisElem {
 
         Self {
             frequency: self.frequency * scale,
-            formant_frequencies: self.formant_frequencies.mul(Array::splat(scale)),
-            antiresonator_frequency: self.antiresonator_frequency * scale,
+            formant_freq: self.formant_freq.mul(Array::splat(scale)),
+            nasal_freq: self.nasal_freq * scale,
             ..self // this means fill in the rest of the struct with self
         }
     }
@@ -208,16 +201,16 @@ pub struct Synthesize<T: Iterator<Item = SynthesisElem>> {
     iter: T,
 
     /// filter state a
-    filter_state_a: Array,
+    formant_state_a: Array,
 
     /// filter state b
-    filter_state_b: Array,
+    formant_state_b: Array,
 
     /// antiresonator state a
-    antiresonator_state_a: f32,
+    nasal_state_a: f32,
 
     /// antiresonator state b
-    antiresonator_state_b: f32,
+    nasal_state_b: f32,
 
     /// phase for the current pulse
     phase: f32,
@@ -293,10 +286,10 @@ where
     fn synthesize(self) -> Synthesize<Self::IntoIter> {
         Synthesize {
             iter: self.into_iter(),
-            filter_state_a: Array::splat(0.0),
-            filter_state_b: Array::splat(0.0),
-            antiresonator_state_a: 0.0,
-            antiresonator_state_b: 0.0,
+            formant_state_a: Array::splat(0.0),
+            formant_state_b: Array::splat(0.0),
+            nasal_state_a: 0.0,
+            nasal_state_b: 0.0,
             phase: 0.0,
             seed: 0,
         }
@@ -308,6 +301,123 @@ impl<T> IntoSynthesize for T where T: IntoIterator<Item = SynthesisElem> + Sized
 
 // that's it, sound synthesis done
 // We also want to jitter all frequencies a bit for more realism, so let's do that next
+
+// first, we want to make a few structs to help with generating noise
+#[derive(Copy, Clone, Debug)]
+struct ValueNoise {
+    current: f32,
+    next: f32,
+    phase: f32,
+    state: u32,
+}
+
+impl ValueNoise {
+    fn new(state: &mut u32) -> Self {
+        let current = random_f32(state);
+        let next = random_f32(state);
+
+        Self {
+            current,
+            next,
+            phase: 0.0,
+            state: *state,
+        }
+    }
+
+    fn next(&mut self, increment: f32) -> f32 {
+        // increment the state
+        self.phase += increment;
+
+        // wrap it around if needed
+        if self.phase > 1.0 {
+            self.phase -= 1.0;
+
+            // also update the noise
+            self.current = self.next;
+            self.next = random_f32(&mut self.state);
+        }
+
+        // and blend between the current and next
+        self.current * (1.0 - self.phase) + self.next * self.phase
+    }
+}
+
+// and for arrays too
+#[derive(Copy, Clone, Debug)]
+struct ArrayValueNoise {
+    current: Array,
+    next: Array,
+    phase: f32,
+    state: u32,
+}
+
+impl ArrayValueNoise {
+    fn new(state: &mut u32) -> Self {
+        let mut current = [0.0; NUM_FORMANTS];
+        let mut next = [0.0; NUM_FORMANTS];
+
+        // write to the arrays
+        for i in 0..NUM_FORMANTS {
+            current[i] = random_f32(state);
+            next[i] = random_f32(state);
+        }
+
+        Self {
+            current: Array::new(current),
+            next: Array::new(next),
+            phase: 0.0,
+            state: *state,
+        }
+    }
+
+    fn next(&mut self, increment: f32) -> Array {
+        // increment the state
+        self.phase += increment;
+
+        // wrap it around if needed
+        if self.phase > 1.0 {
+            self.phase -= 1.0;
+
+            // also update the noise
+            self.current = self.next;
+
+            for i in 0..NUM_FORMANTS {
+                self.next.x[i] = random_f32(&mut self.state);
+            }
+        }
+
+        // and blend between the current and next
+        self.current
+            .mul(Array::splat(1.0 - self.phase))
+            .add(self.next.mul(Array::splat(self.phase)))
+    }
+}
+
+// now we can make our jitter work, as getting random numbers is now easier
+pub struct Jitter<T: Iterator<Item = SynthesisElem>> {
+    /// underlying iterator
+    iter: T,
+
+    /// noise for the frequency
+    freq_noise: ValueNoise,
+
+    /// noise for the formant frequency
+    formant_noise: ArrayValueNoise,
+
+    /// noise for the formant amplitude
+    amplitude_noise: ArrayValueNoise,
+    // nasal frequency
+
+    // nasal amplitude
+
+    // noise frequency
+
+    // frequency deviation
+
+    // formant deviation
+
+    // amplitude deviation
+}
 
 // Here's how it will work
 // synthesizer iterator to generate sound
