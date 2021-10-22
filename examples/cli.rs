@@ -1,3 +1,4 @@
+use grail_rs::{IntoJitter, IntoSequencer, IntoSynthesize};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use rodio::{buffer::SamplesBuffer, OutputStream};
 use std::env;
@@ -111,10 +112,48 @@ fn main() {
         OutputStream::try_default().expect("unable to start audio stream");
 
     // synthesize the speech
-    let generated_audio = vec![];
+    let mut generated_audio = vec![0.0; 1024];
+
+    // bit hacky but should work for now
+    let phoneme = grail_rs::SynthesisElem::new(
+        grail_rs::DEFAULT_SAMPLE_RATE,
+        120.0,
+        [
+            810.0, 1271.0, 2851.0, 3213.0, 1.0, 1.0, 1.0, 1.0, 1200.0, 2000.0, 3000.0, 4000.0,
+        ],
+        [
+            80.0, 120.0, 180.0, 200.0, 100.0, 100.0, 100.0, 100.0, 300.0, 120.0, 100.0, 100.0,
+        ],
+        [0.3, 0.3, 0.2, 0.1, 0.0, 0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0],
+        3000.0,
+        100.0,
+        0.0,
+        0.1,
+    );
+
+    // put it in a sequence element
+    let seq = grail_rs::SequenceElem::new(phoneme, 0.5, 0.2);
+
+    // and extend the sound part with it
+    generated_audio.extend(
+        [seq]
+            .sequence(grail_rs::DEFAULT_SAMPLE_RATE)
+            .jitter(
+                0,
+                16.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
+                8.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
+                8.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
+                0.1,
+            )
+            .synthesize(),
+    );
 
     // display info on how long the audio file is
-    println!("{} seconds of audio, generated in {} ms", 1.0, 1);
+    println!(
+        "{} seconds of audio, generated in {} ms",
+        generated_audio.len() as f32 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
+        1
+    );
 
     // if there's an output file, write to it
     if output_file != String::new() {

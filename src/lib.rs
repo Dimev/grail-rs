@@ -333,7 +333,7 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         // and now, do the antiresonator on the summed value
 
         // and return the found value
-        Some(x.sum())
+        Some(pulse * elem.formant_amp.x[0])
     }
 }
 
@@ -569,6 +569,17 @@ pub struct SequenceElem {
 
     /// time the blending lasts for
     pub blend_length: f32,
+}
+
+impl SequenceElem {
+    /// make a new element
+    pub fn new(elem: SynthesisElem, length: f32, blend_length: f32) -> Self {
+        Self {
+            synthesis_elem: elem,
+            length,
+            blend_length,
+        }
+    }
 }
 
 /// Sequencer, given a time and blend time, it generates the right amount of samples
