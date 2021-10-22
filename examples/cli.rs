@@ -132,7 +132,7 @@ fn main() {
     );
 
     // put it in a sequence element
-    let seq = grail_rs::SequenceElem::new(phoneme, 0.5, 0.2);
+    let seq = grail_rs::SequenceElem::new(phoneme, 1.5, 0.5);
 
     // and extend the sound part with it
     generated_audio.extend(
