@@ -158,10 +158,52 @@ pub struct SynthesisElem {
 // next, make some functions for the element
 // we want to make one from some sample rate, make one with the given sample rate, and blend them
 impl SynthesisElem {
-    // make a new one
+    /// make a new synthesis element. For unit gain, formant_amp should sum up to 1
+    pub fn new(
+        sample_rate: u32,
+        frequency: f32,
+        formant_freq: [f32; NUM_FORMANTS],
+        formant_bw: [f32; NUM_FORMANTS],
+        formant_amp: [f32; NUM_FORMANTS],
+        nasal_freq: f32,
+        nasal_bw: f32,
+        nasal_amp: f32,
+        softness: f32,
+    ) -> Self {
+        Self {
+            frequency: frequency / sample_rate as f32,
+            formant_freq: Array::new(formant_freq).div(Array::splat(sample_rate as f32)),
+            formant_bw: Array::new(formant_bw).div(Array::splat(sample_rate as f32)),
+            formant_amp: Array::new(formant_amp),
+            nasal_freq: nasal_freq / sample_rate as f32,
+            nasal_bw: nasal_bw / sample_rate as f32,
+            nasal_amp,
+            softness,
+        }
+    }
 
-    // make a new one with the default sample rate, and unit gain
-
+    /// make a new one with the default sample rate, and unit gain
+    pub fn new_phoneme(
+        formant_freq: [f32; NUM_FORMANTS],
+        formant_bw: [f32; NUM_FORMANTS],
+        formant_amp: [f32; NUM_FORMANTS],
+        nasal_freq: f32,
+        nasal_bw: f32,
+        nasal_amp: f32,
+        softness: f32,
+    ) -> Self {
+        Self {
+            frequency: 0.0,
+            formant_freq: Array::new(formant_freq).div(Array::splat(DEFAULT_SAMPLE_RATE as f32)),
+            formant_bw: Array::new(formant_bw).div(Array::splat(DEFAULT_SAMPLE_RATE as f32)),
+            // divide it by the sum of the entire amplitudes, that way we get unit gain
+            formant_amp: Array::new(formant_amp).div(Array::splat(Array::new(formant_amp).sum())),
+            nasal_freq: nasal_freq / DEFAULT_SAMPLE_RATE as f32,
+            nasal_bw: nasal_bw / DEFAULT_SAMPLE_RATE as f32,
+            nasal_amp,
+            softness,
+        }
+    }
     /// blend between this synthesis element and another one
     #[inline]
     pub fn blend(self, other: Self, alpha: f32) -> Self {
@@ -183,11 +225,29 @@ impl SynthesisElem {
         // scale factor for the sample rate
         let scale = old_sample_rate as f32 / new_sample_rate as f32;
 
+        // TODO: drop all formants above nyquist
+
         Self {
             frequency: self.frequency * scale,
             formant_freq: self.formant_freq.mul(Array::splat(scale)),
             nasal_freq: self.nasal_freq * scale,
             ..self // this means fill in the rest of the struct with self
+        }
+    }
+
+    /// copy it with a different frequency
+    /// frequency is already divided by the sample rate here
+    #[inline]
+    pub fn copy_with_frequency(self, frequency: f32) -> Self {
+        Self { frequency, ..self }
+    }
+
+    /// copy it without any sound
+    #[inline]
+    pub fn copy_silent(self) -> Self {
+        Self {
+            formant_amp: Array::splat(0.0),
+            ..self
         }
     }
 }
@@ -394,6 +454,7 @@ impl ArrayValueNoise {
 }
 
 // now we can make our jitter work, as getting random numbers is now easier
+#[derive(Copy, Clone, Debug)]
 pub struct Jitter<T: Iterator<Item = SynthesisElem>> {
     /// underlying iterator
     iter: T,
@@ -491,6 +552,125 @@ where
 
 // implement it for anything that can become the right iterator
 impl<T> IntoJitter for T where T: IntoIterator<Item = SynthesisElem> + Sized {}
+
+// we now have a way to synthesize sound, and add random variations to it.
+// However, generating the induvidual samples is kinda a hassle to do, so it would be nicer if we can give each synthesis element a length
+// and then generate the right sequence from that
+// so, we'll create a sequencer that does this
+
+// for this, we'll first need a struct to help with adding the time
+#[derive(Copy, Clone, Debug)]
+pub struct SequenceElem {
+    /// the synthesis element
+    pub synthesis_elem: SynthesisElem,
+
+    /// time this element lasts for
+    pub length: f32,
+
+    /// time the blending lasts for
+    pub blend_length: f32,
+}
+
+/// Sequencer, given a time and blend time, it generates the right amount of samples
+#[derive(Copy, Clone, Debug)]
+pub struct Sequencer<T: Iterator<Item = SequenceElem>> {
+    /// underlying iterator
+    iter: T,
+
+    /// current element
+    cur_elem: Option<SequenceElem>,
+
+    /// next element
+    next_elem: Option<SequenceElem>,
+
+    /// time remaining for this element
+    time: f32,
+
+    /// sample time, how long a sample lasts (1 / sample rate)
+    delta_time: f32,
+}
+
+impl<T: Iterator<Item = SequenceElem>> Iterator for Sequencer<T> {
+    type Item = SynthesisElem;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // decrease the amount of remaining time
+        self.time -= self.delta_time;
+
+        // if this is now below 0, we go to the next pair
+        if self.time < 0.0 {
+            // go to the next one
+            self.cur_elem = self.next_elem;
+
+            // if it's something, set the right time
+            if let Some(elem) = self.cur_elem {
+                self.time = elem.length;
+            }
+        }
+
+        // if there's no current one, try fetching it
+        if self.cur_elem.is_none() {
+            self.cur_elem = self.iter.next();
+
+            // if it's something, set the right time
+            if let Some(elem) = self.cur_elem {
+                self.time = elem.length;
+            }
+        }
+
+        // if there's no next one, try fetching it as well
+        if self.next_elem.is_none() {
+            self.next_elem = self.iter.next();
+        }
+
+        // and match on what to do
+        match (self.cur_elem, self.next_elem) {
+            // both elements, blend to the next one
+            (Some(a), Some(b)) => {
+                // get the blend amount
+                let alpha = (self.time / a.blend_length).min(1.0);
+
+                // and blend the 2
+                Some(a.synthesis_elem.blend(b.synthesis_elem, alpha))
+            }
+
+            // only the first one, blend to the end
+            (Some(a), None) => {
+                // get the blend amount
+                let alpha = (self.time / a.blend_length).min(1.0);
+
+                // and blend with a silent one
+                Some(
+                    a.synthesis_elem
+                        .blend(a.synthesis_elem.copy_silent(), alpha),
+                )
+            }
+
+            // nothing else, return none
+            _ => None,
+        }
+    }
+}
+
+// and implement an easy way to get the iterator
+pub trait IntoSequencer
+where
+    Self: IntoIterator<Item = SequenceElem> + Sized,
+{
+    /// creates a new synthesizer from this iterator, TODO: RELPLACE WITH GATHERING PARAMS FROM SPEAKER?
+    fn sequence(self, sample_rate: u32) -> Sequencer<Self::IntoIter> {
+        Sequencer {
+            iter: self.into_iter(),
+            delta_time: 1.0 / sample_rate as f32,
+            cur_elem: None,
+            next_elem: None,
+            time: 0.0,
+        }
+    }
+}
+
+// implement it for anything that can become the right iterator
+impl<T> IntoSequencer for T where T: IntoIterator<Item = SequenceElem> + Sized {}
 
 // Here's how it will work
 // synthesizer iterator to generate sound
