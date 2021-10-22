@@ -350,7 +350,7 @@ where
             formant_state_b: Array::splat(0.0),
             nasal_state_a: 0.0,
             nasal_state_b: 0.0,
-            phase: 0.0,
+            phase: 0.5,
             seed: 0,
         }
     }
@@ -360,6 +360,45 @@ where
 impl<T> IntoSynthesize for T where T: IntoIterator<Item = SynthesisElem> + Sized {}
 
 // that's it, sound synthesis done
+// before we continue, we'd like to set up the internal represenation for voices
+// a voice consists of a number of synthesis elements, each assigned to a phoneme
+// a phoneme is the smallest sound in speech, so we can use that for the internal representation nicely
+// the downside is that there are quite a few
+
+// first, set up the enum for all phonemes
+pub enum Phoneme {
+	Silence, // Generic silence
+	A, // a
+}
+
+// next up, a voice storage
+// this is not a full voice, but instead all phonemes, so it's easier to pass around
+// we won't make a constructor for it due to it not really being needed
+#[derive(Clone, Copy, Debug)]
+pub struct VoiceStorage {
+	pub silence: SynthesisElem,
+	pub a: SynthesisElem,
+}
+
+impl VoiceStorage {
+
+	/// retreive a synthesis elem based on the given phoneme
+	pub fn get(self, phoneme: Phoneme) -> SynthesisElem {
+		match phoneme {
+			Phoneme::Silence => self.silence,
+			Phoneme::A => self.a,
+		}
+	}
+
+	/// run a function on all phonemes
+	pub fn map(&mut self, func: fn(Phoneme, &mut SynthesisElem)) {
+		func(Phoneme::Silence, &mut self.silence);
+		func(Phoneme::A, &mut self.a);
+	}
+}
+// and next, the full voice
+// which is just the voice storage + extra parameters for intonation
+
 // We also want to jitter all frequencies a bit for more realism, so let's do that next
 
 // first, we want to make a few structs to help with generating noise
@@ -526,7 +565,7 @@ pub trait IntoJitter
 where
     Self: IntoIterator<Item = SynthesisElem> + Sized,
 {
-    /// creates a new synthesizer from this iterator, TODO: RELPLACE WITH GATHERING PARAMS FROM SPEAKER?
+    /// creates a new synthesizer from this iterator, TODO: RELPLACE WITH GATHERING PARAMS FROM SPEAKER
     fn jitter(
         self,
         mut seed: u32,
@@ -562,7 +601,7 @@ impl<T> IntoJitter for T where T: IntoIterator<Item = SynthesisElem> + Sized {}
 #[derive(Copy, Clone, Debug)]
 pub struct SequenceElem {
     /// the synthesis element
-    pub synthesis_elem: SynthesisElem,
+    pub elem: SynthesisElem,
 
     /// time this element lasts for
     pub length: f32,
@@ -575,7 +614,7 @@ impl SequenceElem {
     /// make a new element
     pub fn new(elem: SynthesisElem, length: f32, blend_length: f32) -> Self {
         Self {
-            synthesis_elem: elem,
+            elem,
             length,
             blend_length,
         }
@@ -610,28 +649,29 @@ impl<T: Iterator<Item = SequenceElem>> Iterator for Sequencer<T> {
 
         // if this is now below 0, we go to the next pair
         if self.time < 0.0 {
-            // go to the next one
-            self.cur_elem = self.next_elem;
+            // figure out what to do next
+            match (self.cur_elem, self.next_elem) {
+                // we have both, get a new one
+                (Some(_), Some(a)) => {
+                    self.cur_elem = self.next_elem;
+                    self.next_elem = self.iter.next();
 
-            // if it's something, set the right time
-            if let Some(elem) = self.cur_elem {
-                self.time = elem.length;
+                    // set the time
+                    self.time = a.length;
+                }
+                // we have none, fetch new ones
+                (None, None) => {
+                    self.cur_elem = self.iter.next();
+                    self.next_elem = self.iter.next();
+
+                    // if we have the current one, set the time
+                    if let Some(a) = self.cur_elem {
+                        self.time = a.length;
+                    }
+                }
+                // for the rest, we can simply exit early
+                _ => return None,
             }
-        }
-
-        // if there's no current one, try fetching it
-        if self.cur_elem.is_none() {
-            self.cur_elem = self.iter.next();
-
-            // if it's something, set the right time
-            if let Some(elem) = self.cur_elem {
-                self.time = elem.length;
-            }
-        }
-
-        // if there's no next one, try fetching it as well
-        if self.next_elem.is_none() {
-            self.next_elem = self.iter.next();
         }
 
         // and match on what to do
@@ -641,8 +681,8 @@ impl<T: Iterator<Item = SequenceElem>> Iterator for Sequencer<T> {
                 // get the blend amount
                 let alpha = (self.time / a.blend_length).min(1.0);
 
-                // and blend the 2
-                Some(a.synthesis_elem.blend(b.synthesis_elem, alpha))
+                // and blend the 2, because alpha goes from 1 to 0, we need to blend in the other order
+                Some(b.elem.blend(a.elem, alpha))
             }
 
             // only the first one, blend to the end
@@ -651,10 +691,7 @@ impl<T: Iterator<Item = SequenceElem>> Iterator for Sequencer<T> {
                 let alpha = (self.time / a.blend_length).min(1.0);
 
                 // and blend with a silent one
-                Some(
-                    a.synthesis_elem
-                        .blend(a.synthesis_elem.copy_silent(), alpha),
-                )
+                Some(a.elem.copy_silent().blend(a.elem, alpha))
             }
 
             // nothing else, return none
@@ -668,7 +705,7 @@ pub trait IntoSequencer
 where
     Self: IntoIterator<Item = SequenceElem> + Sized,
 {
-    /// creates a new synthesizer from this iterator, TODO: RELPLACE WITH GATHERING PARAMS FROM SPEAKER?
+    /// creates a new synthesizer from this iterator, TODO: RELPLACE WITH GATHERING PARAMS FROM SPEAKER
     fn sequence(self, sample_rate: u32) -> Sequencer<Self::IntoIter> {
         Sequencer {
             iter: self.into_iter(),
@@ -682,6 +719,9 @@ where
 
 // implement it for anything that can become the right iterator
 impl<T> IntoSequencer for T where T: IntoIterator<Item = SequenceElem> + Sized {}
+
+// next up, we'll want to go from time + phoneme info to a sequence element, so let's do that
+// first, we'll want a new struct to also store timing info with phonemes
 
 // Here's how it will work
 // synthesizer iterator to generate sound

@@ -134,9 +134,11 @@ fn main() {
     // put it in a sequence element
     let seq = grail_rs::SequenceElem::new(phoneme, 1.5, 0.5);
 
+    let start = std::time::Instant::now();
+
     // and extend the sound part with it
     generated_audio.extend(
-        [seq]
+        [seq, seq]
             .sequence(grail_rs::DEFAULT_SAMPLE_RATE)
             .jitter(
                 0,
@@ -148,11 +150,13 @@ fn main() {
             .synthesize(),
     );
 
+    let duration = start.elapsed().as_micros();
+
     // display info on how long the audio file is
     println!(
-        "{} seconds of audio, generated in {} ms",
+        "{} seconds of audio, generated in {} microseconds",
         generated_audio.len() as f32 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
-        1
+        duration
     );
 
     // if there's an output file, write to it
@@ -184,7 +188,7 @@ fn main() {
     // wait till the sound stops playing
     if play_sound {
         std::thread::sleep(std::time::Duration::from_secs_f32(
-            (generated_audio.len() as f32 / grail_rs::DEFAULT_SAMPLE_RATE as f32) + 0.1,
+            (generated_audio.len() as f32 / grail_rs::DEFAULT_SAMPLE_RATE as f32) + 0.5,
         ));
     }
 }
