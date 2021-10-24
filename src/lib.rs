@@ -225,12 +225,25 @@ impl SynthesisElem {
         // scale factor for the sample rate
         let scale = old_sample_rate as f32 / new_sample_rate as f32;
 
-        // TODO: drop all formants above nyquist
+        // get the new frequency
+        let formant_freq = self.formant_freq.mul(Array::splat(scale));
+
+        // drop all formants above nyquist
+        let mut formant_amp = self.formant_amp;
+
+        for (amp, freq) in formant_amp.x.iter_mut().zip(formant_freq.x) {
+            if freq > 0.5 {
+                *amp = 0.0;
+            }
+        }
 
         Self {
             frequency: self.frequency * scale,
             formant_freq: self.formant_freq.mul(Array::splat(scale)),
+            formant_bw: self.formant_bw.mul(Array::splat(scale)),
             nasal_freq: self.nasal_freq * scale,
+            nasal_bw: self.nasal_bw * scale,
+            formant_amp,
             ..self // this means fill in the rest of the struct with self
         }
     }
@@ -366,9 +379,10 @@ impl<T> IntoSynthesize for T where T: IntoIterator<Item = SynthesisElem> + Sized
 // the downside is that there are quite a few
 
 // first, set up the enum for all phonemes
+#[derive(Clone, Copy, Debug)]
 pub enum Phoneme {
-	Silence, // Generic silence
-	A, // a
+    Silence, // Generic silence
+    A,       // a
 }
 
 // next up, a voice storage
@@ -376,28 +390,49 @@ pub enum Phoneme {
 // we won't make a constructor for it due to it not really being needed
 #[derive(Clone, Copy, Debug)]
 pub struct VoiceStorage {
-	pub silence: SynthesisElem,
-	pub a: SynthesisElem,
+    pub silence: SynthesisElem,
+    pub a: SynthesisElem,
 }
 
 impl VoiceStorage {
+    /// retreive a synthesis elem based on the given phoneme
+    pub fn get(self, phoneme: Phoneme) -> SynthesisElem {
+        match phoneme {
+            Phoneme::Silence => self.silence,
+            Phoneme::A => self.a,
+        }
+    }
 
-	/// retreive a synthesis elem based on the given phoneme
-	pub fn get(self, phoneme: Phoneme) -> SynthesisElem {
-		match phoneme {
-			Phoneme::Silence => self.silence,
-			Phoneme::A => self.a,
-		}
-	}
-
-	/// run a function on all phonemes
-	pub fn map(&mut self, func: fn(Phoneme, &mut SynthesisElem)) {
-		func(Phoneme::Silence, &mut self.silence);
-		func(Phoneme::A, &mut self.a);
-	}
+    /// run a function on all phonemes
+    pub fn map(&mut self, func: fn(Phoneme, &mut SynthesisElem)) {
+        func(Phoneme::Silence, &mut self.silence);
+        func(Phoneme::A, &mut self.a);
+    }
 }
 // and next, the full voice
 // which is just the voice storage + extra parameters for intonation
+
+/// A voice containing all needed parameters to synthesize sound from some given phonemes
+#[derive(Clone, Copy, Debug)]
+pub struct Voice {
+    /// sample rate this voice is at
+    pub sample_rate: u32,
+
+    /// phonemes, to generate sound
+    pub phonemes: VoiceStorage,
+
+    /// frequency at which to jitter things, to improve voice naturalness
+    pub jitter_frequency: f32,
+
+    /// how much to jitter the base frequency
+    pub jitter_delta_frequency: f32,
+
+    /// how much to jitter the formant frequencies
+    pub jitter_delta_formant_frequency: f32,
+
+    /// how much to jitter the formant amplitudes
+    pub jitter_delta_amplitude: f32,
+}
 
 // We also want to jitter all frequencies a bit for more realism, so let's do that next
 
@@ -565,15 +600,8 @@ pub trait IntoJitter
 where
     Self: IntoIterator<Item = SynthesisElem> + Sized,
 {
-    /// creates a new synthesizer from this iterator, TODO: RELPLACE WITH GATHERING PARAMS FROM SPEAKER
-    fn jitter(
-        self,
-        mut seed: u32,
-        frequency: f32,
-        delta_frequency: f32,
-        delta_formant_frequency: f32,
-        delta_amplitude: f32,
-    ) -> Jitter<Self::IntoIter> {
+    /// creates a new synthesizer from this iterator
+    fn jitter(self, mut seed: u32, voice: Voice) -> Jitter<Self::IntoIter> {
         Jitter {
             iter: self.into_iter(),
             freq_noise: ValueNoise::new(&mut seed),
@@ -581,10 +609,10 @@ where
             formant_amp_noise: ArrayValueNoise::new(&mut seed),
             nasal_freq_noise: ValueNoise::new(&mut seed),
             nasal_amp_noise: ValueNoise::new(&mut seed),
-            frequency,
-            delta_frequency,
-            delta_amplitude,
-            delta_formant_freq: delta_formant_frequency,
+            frequency: voice.jitter_frequency / voice.sample_rate as f32,
+            delta_frequency: voice.jitter_delta_frequency / voice.sample_rate as f32,
+            delta_formant_freq: voice.jitter_delta_formant_frequency / voice.sample_rate as f32,
+            delta_amplitude: voice.jitter_delta_amplitude,
         }
     }
 }
@@ -705,7 +733,7 @@ pub trait IntoSequencer
 where
     Self: IntoIterator<Item = SequenceElem> + Sized,
 {
-    /// creates a new synthesizer from this iterator, TODO: RELPLACE WITH GATHERING PARAMS FROM SPEAKER
+    /// creates a new sequencer, with the given sample rate
     fn sequence(self, sample_rate: u32) -> Sequencer<Self::IntoIter> {
         Sequencer {
             iter: self.into_iter(),
@@ -722,6 +750,69 @@ impl<T> IntoSequencer for T where T: IntoIterator<Item = SequenceElem> + Sized {
 
 // next up, we'll want to go from time + phoneme info to a sequence element, so let's do that
 // first, we'll want a new struct to also store timing info with phonemes
+#[derive(Copy, Clone, Debug)]
+pub struct PhonemeTime {
+    /// the phoneme
+    pub phoneme: Phoneme,
+
+    /// total length
+    pub length: f32,
+
+    /// length of blending
+    pub blend_length: f32,
+}
+
+// and we'll want to make the selector next.
+// this simply selects the right synthesis elem from a voice
+#[derive(Clone, Copy, Debug)]
+pub struct Selector<T: Iterator<Item = PhonemeTime>> {
+    /// underlying iterator
+    iter: T,
+
+    /// underlying voice storage to get voice data from
+    voice_storage: VoiceStorage,
+}
+
+impl<T: Iterator<Item = PhonemeTime>> Iterator for Selector<T> {
+    type Item = SequenceElem;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // get the next item if we can
+        let phoneme = self.iter.next()?;
+
+        // get the right synthesis elem for this phoneme
+        let elem = self.voice_storage.get(phoneme.phoneme);
+
+        // and put it in a sequence element
+        Some(SequenceElem::new(
+            elem,
+            phoneme.length,
+            phoneme.blend_length,
+        ))
+    }
+}
+
+pub trait IntoSelector
+where
+    Self: IntoIterator<Item = PhonemeTime> + Sized,
+{
+    /// creates a selector from the given voice
+    fn select(self, voice: Voice) -> Selector<Self::IntoIter> {
+        Selector {
+            iter: self.into_iter(),
+            voice_storage: voice.phonemes,
+        }
+    }
+}
+
+// implement it for anything that can become the right iterator
+impl<T> IntoSelector for T where T: IntoIterator<Item = PhonemeTime> + Sized {}
+
+// now, we need to do some more complex stuff again.
+// so far we got most of the sound generating "backend" done, now time for the "frontend"
+// this needs to take in text and convert it into phonemes + timing.
+// we'll first want to define a language, which contains all rules needed for this translation
+// TODO: how?
 
 // Here's how it will work
 // synthesizer iterator to generate sound
