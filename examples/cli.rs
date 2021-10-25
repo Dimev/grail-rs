@@ -1,4 +1,4 @@
-use grail_rs::{IntoJitter, IntoSequencer, IntoSynthesize, IntoSelector};
+use grail_rs::{IntoJitter, IntoSelector, IntoSequencer, IntoSynthesize};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use rodio::{buffer::SamplesBuffer, OutputStream};
 use std::env;
