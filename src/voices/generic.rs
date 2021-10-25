@@ -1,14 +1,15 @@
 //! generic voice
-use crate::{SynthesisElem, Voice, VoiceStorage, DEFAULT_SAMPLE_RATE};
+use crate::{Voice, VoiceStorage, DEFAULT_SAMPLE_RATE};
+use crate::voices::MKPHON;
 
 pub fn generic() -> Voice {
     Voice {
         sample_rate: DEFAULT_SAMPLE_RATE,
         phonemes: VoiceStorage {
-            silence: SynthesisElem::new_phoneme(
+            silence: MKPHON(
                 [1.0; 12], [1.0; 12], [0.0; 12], 3000.0, 100.0, 0.0, 0.1,
             ),
-            a: SynthesisElem::new_phoneme(
+            a: MKPHON(
                 [
                     810.0, 1271.0, 2851.0, 3213.0, 1.0, 1.0, 1.0, 1.0, 1200.0, 2000.0, 3000.0,
                     4000.0,
