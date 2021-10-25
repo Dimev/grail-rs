@@ -1,6 +1,9 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+// we'll want to allow voices to be used from this library
+pub mod voices;
+
 // The main file the synth is in
 // first, define some constants
 
@@ -39,7 +42,7 @@ impl Array {
     }
 
     // and arithmatic
-    // not using the OP traits here to keep it simple
+    // not using the Op traits here to keep it simple
 
     /// adds two arrays together
     #[inline]
@@ -103,7 +106,7 @@ impl Array {
 
 /// generates a random float, and changes the state after doing so
 #[inline]
-pub fn random_f32(state: &mut u32) -> f32 {
+fn random_f32(state: &mut u32) -> f32 {
     // here we change the state with a regular integer rng
     // This is the lehmer random number generator: https://en.wikipedia.org/wiki/Lehmer_random_number_generator
     // 16807 here is a magic number. In theory this could be any coprime, but there are some numbers that work better
@@ -528,6 +531,7 @@ impl ArrayValueNoise {
 }
 
 // now we can make our jitter work, as getting random numbers is now easier
+// all frequencies are in normalized form, so 1.0 is the sample frequency
 #[derive(Copy, Clone, Debug)]
 pub struct Jitter<T: Iterator<Item = SynthesisElem>> {
     /// underlying iterator
@@ -609,9 +613,9 @@ where
             formant_amp_noise: ArrayValueNoise::new(&mut seed),
             nasal_freq_noise: ValueNoise::new(&mut seed),
             nasal_amp_noise: ValueNoise::new(&mut seed),
-            frequency: voice.jitter_frequency / voice.sample_rate as f32,
-            delta_frequency: voice.jitter_delta_frequency / voice.sample_rate as f32,
-            delta_formant_freq: voice.jitter_delta_formant_frequency / voice.sample_rate as f32,
+            frequency: voice.jitter_frequency,
+            delta_frequency: voice.jitter_delta_frequency,
+            delta_formant_freq: voice.jitter_delta_formant_frequency,
             delta_amplitude: voice.jitter_delta_amplitude,
         }
     }
@@ -760,6 +764,9 @@ pub struct PhonemeTime {
 
     /// length of blending
     pub blend_length: f32,
+
+    /// the base frequency, normalized, so 1.0 is the sample frequency
+    pub frequency: f32,
 }
 
 // and we'll want to make the selector next.
@@ -785,7 +792,7 @@ impl<T: Iterator<Item = PhonemeTime>> Iterator for Selector<T> {
 
         // and put it in a sequence element
         Some(SequenceElem::new(
-            elem,
+            elem.copy_with_frequency(phoneme.frequency),
             phoneme.length,
             phoneme.blend_length,
         ))

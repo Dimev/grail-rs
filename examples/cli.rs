@@ -112,7 +112,7 @@ fn main() {
         OutputStream::try_default().expect("unable to start audio stream");
 
     // synthesize the speech
-    let mut generated_audio = vec![0.0; 1024];
+    let mut generated_audio = Vec::with_capacity(grail_rs::DEFAULT_SAMPLE_RATE as usize * 4);
 
     // bit hacky but should work for now
     let phoneme = grail_rs::SynthesisElem::new(
@@ -131,6 +131,18 @@ fn main() {
         0.1,
     );
 
+    let voice = grail_rs::Voice {
+        phonemes: grail_rs::VoiceStorage {
+            silence: phoneme,
+            a: phoneme,
+        },
+        sample_rate: grail_rs::DEFAULT_SAMPLE_RATE,
+        jitter_frequency: 16.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
+        jitter_delta_formant_frequency: 8.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
+        jitter_delta_frequency: 8.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
+        jitter_delta_amplitude: 0.1,
+    };
+
     // put it in a sequence element
     let seq = grail_rs::SequenceElem::new(phoneme, 1.5, 0.5);
 
@@ -140,13 +152,7 @@ fn main() {
     generated_audio.extend(
         [seq, seq]
             .sequence(grail_rs::DEFAULT_SAMPLE_RATE)
-            .jitter(
-                0,
-                16.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
-                8.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
-                8.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
-                0.1,
-            )
+            .jitter(0, voice)
             .synthesize(),
     );
 
