@@ -672,6 +672,7 @@ pub struct Sequencer<T: Iterator<Item = SequenceElem>> {
     delta_time: f32,
 }
 
+// TODO: there's an issue with audio clipping at the end, probably due to blending not finishing 100%, see what causes this
 impl<T: Iterator<Item = SequenceElem>> Iterator for Sequencer<T> {
     type Item = SynthesisElem;
 
