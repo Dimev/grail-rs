@@ -87,7 +87,11 @@ impl Array {
     /// sums all elements in an array together
     #[inline]
     pub fn sum(self) -> f32 {
-        self.x.iter().sum()
+        let mut res = 0.0;
+        for i in 0..NUM_FORMANTS {
+            res += self.x[i];
+        }
+        res
     }
 
     /// blend two arrays, based on some blend value
@@ -342,6 +346,9 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
             arr
         });
 
+        // make sure it's loud enough
+        let y = x.mul(elem.formant_amp);
+
         // now, we can apply the first filter, using the array arithmatic
 
         // now, sum up all the filters, as they were (hopefully) done in parallel
@@ -349,7 +356,7 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         // and now, do the antiresonator on the summed value
 
         // and return the found value
-        Some(pulse * elem.formant_amp.x[0])
+        Some(y.sum())
     }
 }
 
@@ -585,14 +592,22 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Jitter<T> {
             .formant_freq
             .add(formant_freq.mul(Array::splat(self.delta_formant_freq)));
         // we don't want it to get *louder*, so make sure it only becomes softer by doing (2 - [-1, 1]) / 2, which results in [0, 1]
-        elem.formant_amp = elem.formant_amp.add(
-            Array::splat(2.0)
-                .sub(formant_amp)
-                .mul(Array::splat(self.delta_amplitude * 0.5)),
-        );
-        elem.nasal_freq += nasal_freq * self.delta_formant_freq;
-        // same here
-        elem.nasal_amp += (2.0 - nasal_amp) * self.delta_amplitude * 0.5;
+        // we'll then multiply it by the appropriate thing so we can't end up with negative amplitudes for some sounds
+        let formant_amp_delta = formant_amp
+            .add(Array::splat(1.0))
+            .mul(Array::splat(0.5 * self.delta_amplitude));
+
+		// multiplier is 1 - x, so that it doesn't become very soft
+        let formant_amp_mul = Array::splat(1.0).sub(formant_amp_delta);
+        elem.formant_amp = elem.formant_amp.mul(formant_amp_mul);
+
+		// just the nasal frequency passing by
+		elem.nasal_freq += nasal_freq * self.delta_formant_freq;
+
+		// we'll want the same for the nasal amplitude
+		let nasal_amp_delta = (nasal_amp + 1.0) * (self.delta_amplitude * 0.5);
+		let nasal_amp_mul = 1.0 - nasal_amp_delta;
+        elem.nasal_amp *= nasal_amp_mul;
 
         // and return the modified element
         Some(elem)

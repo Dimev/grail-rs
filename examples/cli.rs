@@ -137,10 +137,10 @@ fn main() {
             a: phoneme,
         },
         sample_rate: grail_rs::DEFAULT_SAMPLE_RATE,
-        jitter_frequency: 16.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
+        jitter_frequency: 12.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
         jitter_delta_formant_frequency: 8.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
         jitter_delta_frequency: 8.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
-        jitter_delta_amplitude: 0.1,
+        jitter_delta_amplitude: 0.2,
     };
 
     // put it in a sequence element
