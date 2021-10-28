@@ -333,7 +333,7 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         let noise = random_f32(&mut self.seed);
 
         // now put these in an array, this way avoids using mut directly
-        let x = Array::new({
+        let inp = Array::new({
             // fill it with noise
             let mut arr = [noise; NUM_FORMANTS];
 
@@ -347,16 +347,37 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         });
 
         // make sure it's loud enough
-        let y = x.mul(elem.formant_amp);
+        let x = inp.mul(elem.formant_amp);
+
+		// TODO: DIFFERENT FILTER TYPE
 
         // now, we can apply the first filter, using the array arithmatic
+		let true_freq = elem.formant_freq.mul(Array::splat(core::f32::consts::TAU));
+
+		// true damping. This is actually exp(-pi * bw), but (1 - bw)^3 is a good approximation
+		let damping_factor = Array::splat(1.0).sub(elem.formant_bw);
+		let damping = damping_factor.mul(damping_factor).mul(damping_factor);
+
+		// integrate the sine wave
+		self.formant_state_b = self.formant_state_b.sub(self.formant_state_a.mul(true_freq));
+		self.formant_state_a = self.formant_state_a.sub(self.formant_state_b.mul(true_freq));
+
+		// damping
+		self.formant_state_a = self.formant_state_a.mul(damping);
+		self.formant_state_b = self.formant_state_b.mul(damping);
+
+		// add the excitation to the oscillator
+		self.formant_state_a = self.formant_state_a.add(x.mul(Array::splat(1.0).sub(damping.mul(damping))));
+
+		// and the result
+		let parallel_result = self.formant_state_a.sum();
 
         // now, sum up all the filters, as they were (hopefully) done in parallel
 
         // and now, do the antiresonator on the summed value
 
         // and return the found value
-        Some(y.sum())
+        Some(parallel_result)
     }
 }
 
