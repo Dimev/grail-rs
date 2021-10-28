@@ -597,16 +597,16 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Jitter<T> {
             .add(Array::splat(1.0))
             .mul(Array::splat(0.5 * self.delta_amplitude));
 
-		// multiplier is 1 - x, so that it doesn't become very soft
+        // multiplier is 1 - x, so that it doesn't become very soft
         let formant_amp_mul = Array::splat(1.0).sub(formant_amp_delta);
         elem.formant_amp = elem.formant_amp.mul(formant_amp_mul);
 
-		// just the nasal frequency passing by
-		elem.nasal_freq += nasal_freq * self.delta_formant_freq;
+        // just the nasal frequency passing by
+        elem.nasal_freq += nasal_freq * self.delta_formant_freq;
 
-		// we'll want the same for the nasal amplitude
-		let nasal_amp_delta = (nasal_amp + 1.0) * (self.delta_amplitude * 0.5);
-		let nasal_amp_mul = 1.0 - nasal_amp_delta;
+        // we'll want the same for the nasal amplitude
+        let nasal_amp_delta = (nasal_amp + 1.0) * (self.delta_amplitude * 0.5);
+        let nasal_amp_mul = 1.0 - nasal_amp_delta;
         elem.nasal_amp *= nasal_amp_mul;
 
         // and return the modified element

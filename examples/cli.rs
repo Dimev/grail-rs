@@ -1,5 +1,4 @@
 use grail_rs::{IntoJitter, IntoSelector, IntoSequencer, IntoSynthesize};
-use hound::{SampleFormat, WavSpec, WavWriter};
 use rodio::{buffer::SamplesBuffer, OutputStream};
 use std::env;
 use std::fs::File;
@@ -20,6 +19,62 @@ fn find_argument(args: &[String], short: &str, long: &str) -> Option<String> {
             _ => false,
         })
         .map(|x| x[1].clone())
+}
+
+// save a wav file
+fn save_wav(path: &str, data: &[f32], sample_rate: u32) {
+    // open a file
+    if let Ok(mut file) = std::fs::File::create(path) {
+
+        // write the header
+        // riff
+        file.write(b"RIFF");
+
+        // file size, or sub chunk 2 size + 36
+        file.write(&((36 + data.len() * 2) as i32).to_le_bytes());
+
+        // wave header
+        file.write(b"WAVE");
+
+        // format
+        file.write(b"fmt ");
+
+        // sub chunk size
+        file.write(&(16 as i32).to_le_bytes());
+
+        // format, just 1 as we want pcm
+        file.write(&(1 as i16).to_le_bytes());
+
+        // 1 channel
+        file.write(&(1 as i16).to_le_bytes());
+
+        // sample rate
+        file.write(&(sample_rate as i32).to_le_bytes());
+
+        // byte rate, sample rate * num channels * bytes per sample
+        file.write(&(sample_rate as i32 * 2).to_le_bytes());
+
+        // block align, num channels * bits per sample
+        file.write(&(2 as i16).to_le_bytes());
+
+        // bits per sample
+        file.write(&(16 as i16).to_le_bytes());
+
+        // data
+        file.write(b"data");
+
+        // sub chunk size, num samples * num channels * bytes per sample
+        file.write(&(data.len() as i32 * 2).to_le_bytes());
+
+        // and write the actual sound data
+        for i in data.iter().map(|x| (x * i16::MAX as f32) as i16) {
+            // write the sample
+            file.write(&i.to_le_bytes());
+        }
+
+        // and store
+        file.flush();
+    }
 }
 
 fn main() {
@@ -117,7 +172,7 @@ fn main() {
     // bit hacky but should work for now
     let phoneme = grail_rs::SynthesisElem::new(
         grail_rs::DEFAULT_SAMPLE_RATE,
-        120.0,
+        100.0,
         [
             810.0, 1271.0, 2851.0, 3213.0, 1.0, 1.0, 1.0, 1.0, 1200.0, 2000.0, 3000.0, 4000.0,
         ],
@@ -154,7 +209,7 @@ fn main() {
             phoneme: grail_rs::Phoneme::A,
             length: 2.0,
             blend_length: 0.2,
-            frequency: 120.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
+            frequency: 100.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
         }]
         .select(grail_rs::voices::generic())
         .sequence(grail_rs::DEFAULT_SAMPLE_RATE)
@@ -175,19 +230,8 @@ fn main() {
     if output_file != String::new() {
         println!("Writing generated sound to {}", output_file);
 
-        // this is a wav file, TODO: replace with our own code
-        let spec = WavSpec {
-            channels: 1,
-            sample_rate: grail_rs::DEFAULT_SAMPLE_RATE,
-            bits_per_sample: 16,
-            sample_format: SampleFormat::Int,
-        };
-        let mut writer = WavWriter::create(output_file.as_str(), spec).unwrap();
-        for sample in generated_audio.iter() {
-            writer
-                .write_sample((sample * i16::MAX as f32) as i16)
-                .unwrap();
-        }
+		// and save the file
+        save_wav(&output_file, &generated_audio, sample_rate);
     }
 
     // and play it back, if needed // TODO put this in a function

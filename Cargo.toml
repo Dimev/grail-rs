@@ -19,5 +19,5 @@ opt-level = 3
 
 [dev-dependencies]
 # still need some here to help with audio playback
+# because that's generally difficult to do
 rodio = "0.14"
-hound = "3.4"
