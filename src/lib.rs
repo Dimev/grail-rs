@@ -792,7 +792,7 @@ impl<T> IntoSequencer for T where T: IntoIterator<Item = SequenceElem> + Sized {
 // next up, we'll want to go from time + phoneme info to a sequence element, so let's do that
 // first, we'll want a new struct to also store timing info with phonemes
 #[derive(Copy, Clone, Debug)]
-pub struct PhonemeTime {
+pub struct PhonemeElem {
     /// the phoneme
     pub phoneme: Phoneme,
 
@@ -809,7 +809,7 @@ pub struct PhonemeTime {
 // and we'll want to make the selector next.
 // this simply selects the right synthesis elem from a voice
 #[derive(Clone, Copy, Debug)]
-pub struct Selector<T: Iterator<Item = PhonemeTime>> {
+pub struct Selector<T: Iterator<Item = PhonemeElem>> {
     /// underlying iterator
     iter: T,
 
@@ -817,7 +817,7 @@ pub struct Selector<T: Iterator<Item = PhonemeTime>> {
     voice_storage: VoiceStorage,
 }
 
-impl<T: Iterator<Item = PhonemeTime>> Iterator for Selector<T> {
+impl<T: Iterator<Item = PhonemeElem>> Iterator for Selector<T> {
     type Item = SequenceElem;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -838,7 +838,7 @@ impl<T: Iterator<Item = PhonemeTime>> Iterator for Selector<T> {
 
 pub trait IntoSelector
 where
-    Self: IntoIterator<Item = PhonemeTime> + Sized,
+    Self: IntoIterator<Item = PhonemeElem> + Sized,
 {
     /// creates a selector from the given voice
     fn select(self, voice: Voice) -> Selector<Self::IntoIter> {
@@ -850,7 +850,7 @@ where
 }
 
 // implement it for anything that can become the right iterator
-impl<T> IntoSelector for T where T: IntoIterator<Item = PhonemeTime> + Sized {}
+impl<T> IntoSelector for T where T: IntoIterator<Item = PhonemeElem> + Sized {}
 
 // now, we need to do some more complex stuff again.
 // so far we got most of the sound generating "backend" done, now time for the "frontend"

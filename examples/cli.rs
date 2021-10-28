@@ -102,20 +102,31 @@ fn main() {
     // check what we need to do
     if has_argument(&args, "-h", "--help") || args.len() < 2 {
         // print help menu
-        // grail-rs version
-        println!("Grail-rs version {}", 0);
+		println!("Grail, a rust speech synthesizer");
+		println!("The last argument is interpreted as text to be spoken");
+		println!("So 'grail -v bob hello' will say 'hello'. -v is to set the voice, bob in this case");
 
         // flag descriptions
+		println!("Flags:");
+		println!("-v or --voice is to set the voice");
+    	println!("-o or --output to set the output file path");
+    	println!("-l or --langauge sets the language ruleset");
+    	println!("-r or --resample to change the sample rate");
+    	println!("-i or --input to read from a file");
+    	println!("-s or --silent to not play back any sound");
+    	println!("-V or --version to display the version");
 
         // list of voices
+		println!("Voices:");
 
         // list of languages
+		println!("Languages:");
 
         // stop
         return;
     } else if has_argument(&args, "-V", "--version") {
         // print the version
-        println!("Grail-rs version {}", 0);
+        println!("Grail-rs version {}", "0.0.0");
 
         // stop
         return;
@@ -205,7 +216,7 @@ fn main() {
 
     // and extend the sound part with it
     generated_audio.extend(
-        [grail_rs::PhonemeTime {
+        [grail_rs::PhonemeElem {
             phoneme: grail_rs::Phoneme::A,
             length: 2.0,
             blend_length: 0.2,
