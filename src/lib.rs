@@ -360,7 +360,7 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
 
 		// integrate the sine wave
 		self.formant_state_b = self.formant_state_b.sub(self.formant_state_a.mul(true_freq));
-		self.formant_state_a = self.formant_state_a.sub(self.formant_state_b.mul(true_freq));
+		self.formant_state_a = self.formant_state_a.add(self.formant_state_b.mul(true_freq));
 
 		// damping
 		self.formant_state_a = self.formant_state_a.mul(damping);
