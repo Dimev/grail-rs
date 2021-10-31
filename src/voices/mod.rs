@@ -3,6 +3,7 @@
 use crate::{SynthesisElem, NUM_FORMANTS};
 
 // helper for making phonemes
+// if you're porting this, put this in a seperate file somewhere so you don't include all voices when including a single voice
 pub const MKPHON: fn(
     [f32; NUM_FORMANTS],
     [f32; NUM_FORMANTS],

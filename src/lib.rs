@@ -410,6 +410,8 @@ impl<T> IntoSynthesize for T where T: IntoIterator<Item = SynthesisElem> + Sized
 // the downside is that there are quite a few
 
 // first, set up the enum for all phonemes
+// TODO: IPA or some reduced set?
+// reducet set makes it easier to make voices
 #[derive(Clone, Copy, Debug)]
 pub enum Phoneme {
     Silence, // Generic silence
@@ -708,7 +710,6 @@ pub struct Sequencer<T: Iterator<Item = SequenceElem>> {
     delta_time: f32,
 }
 
-// TODO: there's an issue with audio clipping at the end, probably due to blending not finishing 100%, see what causes this
 impl<T: Iterator<Item = SequenceElem>> Iterator for Sequencer<T> {
     type Item = SynthesisElem;
 
