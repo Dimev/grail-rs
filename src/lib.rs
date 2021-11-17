@@ -43,6 +43,8 @@ impl Array {
 
     // and arithmatic
     // not using the Op traits here to keep it simple
+	// TODO: actually do use the Op traits, and just explain what they are for
+	// arith looks a lot better with a simple + - * and /
 
     /// adds two arrays together
     #[inline]
@@ -128,7 +130,7 @@ fn random_f32(state: &mut u32) -> f32 {
 
     // and here we get the float number
     // we have a range of 1-2, but we want -1 to 1
-    return (f32::from_bits(res) - 1.5) * 2.0;
+    (f32::from_bits(res) - 1.5) * 2.0
 }
 
 // next up, let's go to the audio part
@@ -338,8 +340,8 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
             let mut arr = [noise; NUM_FORMANTS];
 
             // and set the first n to the pulse
-            for i in 0..NUM_VOICED_FORMANTS {
-                arr[i] = pulse;
+            for elem in arr.iter_mut().take(NUM_VOICED_FORMANTS) {
+                *elem = pulse;
             }
 
             // and return the array to put it in x
