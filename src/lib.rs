@@ -1,6 +1,9 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+// we'll want to implement these for arrays
+use core::ops::{Add, Div, Mul, Sub};
+
 // we'll want to allow voices to be used from this library
 pub mod voices;
 
@@ -19,7 +22,7 @@ pub const NUM_VOICED_FORMANTS: usize = 8;
 
 // next, let's make a struct to help storing arrays, and do operations on them
 
-/// Array, containing NUM_FORMANTS elements. Used to store formants
+/// Array, containing NUM_FORMANTS floats. Used to store per-formant data
 #[derive(Copy, Clone, Debug)]
 pub struct Array {
     /// inner array
@@ -41,51 +44,6 @@ impl Array {
         }
     }
 
-    // and arithmatic
-    // not using the Op traits here to keep it simple
-	// TODO: actually do use the Op traits, and just explain what they are for
-	// arith looks a lot better with a simple + - * and /
-
-    /// adds two arrays together
-    #[inline]
-    pub fn add(self, other: Self) -> Self {
-        let mut res = self;
-        for i in 0..NUM_FORMANTS {
-            res.x[i] += other.x[i];
-        }
-        res
-    }
-
-    /// subtracts an array from another
-    #[inline]
-    pub fn sub(self, other: Self) -> Self {
-        let mut res = self;
-        for i in 0..NUM_FORMANTS {
-            res.x[i] -= other.x[i];
-        }
-        res
-    }
-
-    /// multiplies two arrays together
-    #[inline]
-    pub fn mul(self, other: Self) -> Self {
-        let mut res = self;
-        for i in 0..NUM_FORMANTS {
-            res.x[i] *= other.x[i];
-        }
-        res
-    }
-
-    /// divides one array with another
-    #[inline]
-    pub fn div(self, other: Self) -> Self {
-        let mut res = self;
-        for i in 0..NUM_FORMANTS {
-            res.x[i] /= other.x[i];
-        }
-        res
-    }
-
     /// sums all elements in an array together
     #[inline]
     pub fn sum(self) -> f32 {
@@ -103,6 +61,60 @@ impl Array {
         for i in 0..NUM_FORMANTS {
             res.x[i] *= 1.0 - alpha;
             res.x[i] += other.x[i] * alpha;
+        }
+        res
+    }
+}
+
+// and arithmatic
+// using the Op  traits to make life easier here, this way we can just do +, - * and /
+impl Add for Array {
+    type Output = Self;
+    /// adds two arrays together
+    #[inline]
+    fn add(self, other: Self) -> Self {
+        let mut res = self;
+        for i in 0..NUM_FORMANTS {
+            res.x[i] += other.x[i];
+        }
+        res
+    }
+}
+
+impl Sub for Array {
+    type Output = Self;
+    /// subtracts an array from another
+    #[inline]
+    fn sub(self, other: Self) -> Self {
+        let mut res = self;
+        for i in 0..NUM_FORMANTS {
+            res.x[i] -= other.x[i];
+        }
+        res
+    }
+}
+
+impl Mul for Array {
+    type Output = Self;
+    /// multiplies two arrays together
+    #[inline]
+    fn mul(self, other: Self) -> Self {
+        let mut res = self;
+        for i in 0..NUM_FORMANTS {
+            res.x[i] *= other.x[i];
+        }
+        res
+    }
+}
+
+impl Div for Array {
+    type Output = Self;
+    /// divides one array with another
+    #[inline]
+    fn div(self, other: Self) -> Self {
+        let mut res = self;
+        for i in 0..NUM_FORMANTS {
+            res.x[i] /= other.x[i];
         }
         res
     }
@@ -181,8 +193,8 @@ impl SynthesisElem {
     ) -> Self {
         Self {
             frequency: frequency / sample_rate as f32,
-            formant_freq: Array::new(formant_freq).div(Array::splat(sample_rate as f32)),
-            formant_bw: Array::new(formant_bw).div(Array::splat(sample_rate as f32)),
+            formant_freq: Array::new(formant_freq) / Array::splat(sample_rate as f32),
+            formant_bw: Array::new(formant_bw) / Array::splat(sample_rate as f32),
             formant_amp: Array::new(formant_amp),
             nasal_freq: nasal_freq / sample_rate as f32,
             nasal_bw: nasal_bw / sample_rate as f32,
@@ -203,10 +215,10 @@ impl SynthesisElem {
     ) -> Self {
         Self {
             frequency: 0.0,
-            formant_freq: Array::new(formant_freq).div(Array::splat(DEFAULT_SAMPLE_RATE as f32)),
-            formant_bw: Array::new(formant_bw).div(Array::splat(DEFAULT_SAMPLE_RATE as f32)),
+            formant_freq: Array::new(formant_freq) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
+            formant_bw: Array::new(formant_bw) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
             // divide it by the sum of the entire amplitudes, that way we get unit gain
-            formant_amp: Array::new(formant_amp).div(Array::splat(Array::new(formant_amp).sum())),
+            formant_amp: Array::new(formant_amp) / Array::splat(Array::new(formant_amp).sum()),
             nasal_freq: nasal_freq / DEFAULT_SAMPLE_RATE as f32,
             nasal_bw: nasal_bw / DEFAULT_SAMPLE_RATE as f32,
             nasal_amp,
@@ -235,7 +247,7 @@ impl SynthesisElem {
         let scale = old_sample_rate as f32 / new_sample_rate as f32;
 
         // get the new frequency
-        let formant_freq = self.formant_freq.mul(Array::splat(scale));
+        let formant_freq = self.formant_freq * Array::splat(scale);
 
         // drop all formants above nyquist
         let mut formant_amp = self.formant_amp;
@@ -248,8 +260,8 @@ impl SynthesisElem {
 
         Self {
             frequency: self.frequency * scale,
-            formant_freq: self.formant_freq.mul(Array::splat(scale)),
-            formant_bw: self.formant_bw.mul(Array::splat(scale)),
+            formant_freq: self.formant_freq * Array::splat(scale),
+            formant_bw: self.formant_bw * Array::splat(scale),
             nasal_freq: self.nasal_freq * scale,
             nasal_bw: self.nasal_bw * scale,
             formant_amp,
@@ -349,30 +361,30 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         });
 
         // make sure it's loud enough
-        let x = inp.mul(elem.formant_amp);
+        let x = inp * elem.formant_amp;
 
-		// TODO: DIFFERENT FILTER TYPE
+        // TODO: DIFFERENT FILTER TYPE
 
         // now, we can apply the first filter, using the array arithmatic
-		let true_freq = elem.formant_freq.mul(Array::splat(core::f32::consts::TAU));
+        let true_freq = elem.formant_freq * Array::splat(core::f32::consts::TAU);
 
-		// true damping. This is actually exp(-pi * bw), but (1 - bw)^3 is a good approximation
-		let damping_factor = Array::splat(1.0).sub(elem.formant_bw);
-		let damping = damping_factor.mul(damping_factor).mul(damping_factor);
+        // true damping. This is actually exp(-pi * bw), but (1 - bw)^3 is a good approximation
+        let damping_factor = Array::splat(1.0) - elem.formant_bw;
+        let damping = damping_factor * damping_factor * damping_factor;
 
-		// integrate the sine wave
-		self.formant_state_b = self.formant_state_b.sub(self.formant_state_a.mul(true_freq));
-		self.formant_state_a = self.formant_state_a.add(self.formant_state_b.mul(true_freq));
+        // integrate the sine wave
+        self.formant_state_b = self.formant_state_b - self.formant_state_a * true_freq;
+        self.formant_state_a = self.formant_state_a + self.formant_state_b * true_freq;
 
-		// damping
-		self.formant_state_a = self.formant_state_a.mul(damping);
-		self.formant_state_b = self.formant_state_b.mul(damping);
+        // damping
+        self.formant_state_a = self.formant_state_a * damping;
+        self.formant_state_b = self.formant_state_b * damping;
 
-		// add the excitation to the oscillator
-		self.formant_state_a = self.formant_state_a.add(x.mul(Array::splat(1.0).sub(damping.mul(damping))));
+        // add the excitation to the oscillator
+        self.formant_state_a = self.formant_state_a + (x * (Array::splat(1.0) - damping * damping));
 
-		// and the result
-		let parallel_result = self.formant_state_a.sum();
+        // and the result
+        let parallel_result = self.formant_state_a.sum();
 
         // now, sum up all the filters, as they were (hopefully) done in parallel
 
@@ -556,9 +568,7 @@ impl ArrayValueNoise {
         }
 
         // and blend between the current and next
-        self.current
-            .mul(Array::splat(1.0 - self.phase))
-            .add(self.next.mul(Array::splat(self.phase)))
+        self.current * Array::splat(1.0 - self.phase) + self.next * Array::splat(self.phase)
     }
 }
 
@@ -613,18 +623,16 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Jitter<T> {
 
         // change them in the element
         elem.frequency += freq * self.delta_frequency;
-        elem.formant_freq = elem
-            .formant_freq
-            .add(formant_freq.mul(Array::splat(self.delta_formant_freq)));
+        elem.formant_freq =
+            elem.formant_freq + formant_freq * Array::splat(self.delta_formant_freq);
         // we don't want it to get *louder*, so make sure it only becomes softer by doing (2 - [-1, 1]) / 2, which results in [0, 1]
         // we'll then multiply it by the appropriate thing so we can't end up with negative amplitudes for some sounds
-        let formant_amp_delta = formant_amp
-            .add(Array::splat(1.0))
-            .mul(Array::splat(0.5 * self.delta_amplitude));
+        let formant_amp_delta =
+            (formant_amp + Array::splat(1.0)) * Array::splat(0.5 * self.delta_amplitude);
 
         // multiplier is 1 - x, so that it doesn't become very soft
-        let formant_amp_mul = Array::splat(1.0).sub(formant_amp_delta);
-        elem.formant_amp = elem.formant_amp.mul(formant_amp_mul);
+        let formant_amp_mul = Array::splat(1.0) - formant_amp_delta;
+        elem.formant_amp = elem.formant_amp * formant_amp_mul;
 
         // just the nasal frequency passing by
         elem.nasal_freq += nasal_freq * self.delta_formant_freq;

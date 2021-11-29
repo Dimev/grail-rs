@@ -25,7 +25,6 @@ fn find_argument(args: &[String], short: &str, long: &str) -> Option<String> {
 fn save_wav(path: &str, data: &[f32], sample_rate: u32) {
     // open a file
     if let Ok(mut file) = std::fs::File::create(path) {
-
         // write the header
         // riff
         file.write(b"RIFF");
@@ -102,25 +101,27 @@ fn main() {
     // check what we need to do
     if has_argument(&args, "-h", "--help") || args.len() < 2 {
         // print help menu
-		println!("Grail, a rust speech synthesizer");
-		println!("The last argument is interpreted as text to be spoken");
-		println!("So 'grail -v bob hello' will say 'hello'. -v is to set the voice, bob in this case");
+        println!("Grail, a rust speech synthesizer");
+        println!("The last argument is interpreted as text to be spoken");
+        println!(
+            "So 'grail -v bob hello' will say 'hello'. -v is to set the voice, bob in this case"
+        );
 
         // flag descriptions
-		println!("Flags:");
-		println!("-v or --voice is to set the voice");
-    	println!("-o or --output to set the output file path");
-    	println!("-l or --langauge sets the language ruleset");
-    	println!("-r or --resample to change the sample rate");
-    	println!("-i or --input to read from a file");
-    	println!("-s or --silent to not play back any sound");
-    	println!("-V or --version to display the version");
+        println!("Flags:");
+        println!("-v or --voice is to set the voice");
+        println!("-o or --output to set the output file path");
+        println!("-l or --langauge sets the language ruleset");
+        println!("-r or --resample to change the sample rate");
+        println!("-i or --input to read from a file");
+        println!("-s or --silent to not play back any sound");
+        println!("-V or --version to display the version");
 
         // list of voices
-		println!("Voices:");
+        println!("Voices:");
 
         // list of languages
-		println!("Languages:");
+        println!("Languages:");
 
         // stop
         return;
@@ -241,7 +242,7 @@ fn main() {
     if output_file != String::new() {
         println!("Writing generated sound to {}", output_file);
 
-		// and save the file
+        // and save the file
         save_wav(&output_file, &generated_audio, sample_rate);
     }
 
