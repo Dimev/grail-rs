@@ -20,6 +20,19 @@ pub const NUM_FORMANTS: usize = 12;
 /// the number of formants that are voiced, and don't receive noise as input
 pub const NUM_VOICED_FORMANTS: usize = 8;
 
+// and some arithmatic functions
+// these are approximations to help speed things up
+// hyperbolic tangent, x is multiplied by pi
+fn tan_approx(x: f32) -> f32 {
+
+	// tan(x) = sin(x) / cos(x)
+	// we can approximate sin and x with the bhaskara I approximation quite well
+	// which is 16x(pi - x) / 5pi^2 - 4x(pi - x) for sin
+	// if we fill it in, multiply pi by and rewrite it, we get this:
+	((1.0 - x) * x * (5.0 - 4.0 * (x + 0.5) * (0.5 - x))) / ((x + 0.5) * (5.0 - 4.0 * (1.0 - x) * x) * (0.5 - x))
+
+}
+
 // next, let's make a struct to help storing arrays, and do operations on them
 
 /// Array, containing NUM_FORMANTS floats. Used to store per-formant data
@@ -64,6 +77,16 @@ impl Array {
         }
         res
     }
+
+	/// hyperbolic tangent approximation
+	#[inline]
+	pub fn tan_approx(self) -> Self {
+		let mut res = self;
+		for i in 0..NUM_FORMANTS {
+			res.x[i] = tan_approx(res.x[i])
+		}
+		res
+	}
 }
 
 // and arithmatic
@@ -356,6 +379,8 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
                 *elem = pulse;
             }
 
+			// TODO: FIGURE OUT PROPER LOUDNESS FOR THE FILTER
+
             // and return the array to put it in x
             arr
         });
@@ -363,35 +388,49 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         // make sure it's loud enough
         let x = inp * elem.formant_amp;
 
-        // TODO: DIFFERENT FILTER TYPE
+		// now, apply the parallel bandpass filter
+		// this is a State Variable Filter
+		// first, the parameters
+		let g = elem.formant_freq.tan_approx();
 
-        // now, we can apply the first filter, using the array arithmatic
-        let true_freq = elem.formant_freq * Array::splat(core::f32::consts::TAU);
+		// stuff needed to make the filter parameters
+		// k = 1 / Q, and bandwidth = frequency / Q, so rewrite it to get k from the bandwidth and freq
+		let k = elem.formant_bw  / elem.formant_freq;
+		let a1 = Array::splat(1.0) / (Array::splat(1.0) + g * (g + k));
+		let a2 = g * a1;
 
-        // true damping. This is actually exp(-pi * bw), but (1 - bw)^3 is a good approximation
-        let damping_factor = Array::splat(1.0) - elem.formant_bw;
-        let damping = damping_factor * damping_factor * damping_factor;
+		// process the filter
+		//let v3 = x - self.formant_state_b;
+		let v1 = a1 * self.formant_state_a + a2 * (x - self.formant_state_b);
+		let v2 = self.formant_state_b + g * v1;
 
-        // integrate the sine wave
-        self.formant_state_b = self.formant_state_b - self.formant_state_a * true_freq;
-        self.formant_state_a = self.formant_state_a + self.formant_state_b * true_freq;
+		// update the state
+		self.formant_state_a = Array::splat(2.0) * v1 - self.formant_state_a;
+		self.formant_state_b = Array::splat(2.0) * v2 - self.formant_state_b;
 
-        // damping
-        self.formant_state_a = self.formant_state_a * damping;
-        self.formant_state_b = self.formant_state_b * damping;
+		// we're interested in the bandpass result here
+		// which is just v1
+		let r = v1.sum();
 
-        // add the excitation to the oscillator
-        self.formant_state_a = self.formant_state_a + (x * (Array::splat(1.0) - damping * damping));
+		// now, do the same to get the notch filter
+		let g = tan_approx(elem.nasal_freq);
 
-        // and the result
-        let parallel_result = self.formant_state_a.sum();
+		// parameters
+		let k = elem.nasal_bw / elem.nasal_freq;
+		let a1 = 1.0 / (1.0 + g * (g + k));
+		let a2 = g * a1;
 
-        // now, sum up all the filters, as they were (hopefully) done in parallel
+		// process
+		//let v3 = r - self.nasal_state_b;
+		let v1 = a1 * self.nasal_state_a + a2 * (r - self.nasal_state_b);
+		let v2 = self.nasal_state_b + g * v1;
 
-        // and now, do the antiresonator on the summed value
+		// update
+		self.nasal_state_a = 2.0 * v1 - self.nasal_state_a;
+		self.nasal_state_b = 2.0 * v2 - self.nasal_state_b;
 
-        // and return the found value
-        Some(parallel_result)
+		// and the notch result
+		Some(r - k * v1 * elem.nasal_amp)
     }
 }
 
