@@ -127,7 +127,7 @@ fn main() {
         return;
     } else if has_argument(&args, "-V", "--version") {
         // print the version
-        println!("Grail-rs version {}", "0.0.0");
+        println!("Grail-rs version {}", env!("CARGO_PKG_VERSION"));
 
         // stop
         return;
@@ -181,38 +181,7 @@ fn main() {
     // synthesize the speech
     let mut generated_audio = Vec::with_capacity(grail_rs::DEFAULT_SAMPLE_RATE as usize * 4);
 
-    // bit hacky but should work for now
-    let phoneme = grail_rs::SynthesisElem::new(
-        grail_rs::DEFAULT_SAMPLE_RATE,
-        100.0,
-        [
-            810.0, 1271.0, 2851.0, 3213.0, 1.0, 1.0, 1.0, 1.0, 1200.0, 2000.0, 3000.0, 4000.0,
-        ],
-        [
-            80.0, 120.0, 180.0, 200.0, 100.0, 100.0, 100.0, 100.0, 300.0, 120.0, 100.0, 100.0,
-        ],
-        [0.3, 0.3, 0.2, 0.1, 0.0, 0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0],
-        3000.0,
-        100.0,
-        0.0,
-        0.1,
-    );
-
-    let voice = grail_rs::Voice {
-        phonemes: grail_rs::VoiceStorage {
-            silence: phoneme,
-            a: phoneme,
-        },
-        sample_rate: grail_rs::DEFAULT_SAMPLE_RATE,
-        jitter_frequency: 12.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
-        jitter_delta_formant_frequency: 8.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
-        jitter_delta_frequency: 8.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
-        jitter_delta_amplitude: 0.2,
-    };
-
-    // put it in a sequence element
-    let seq = grail_rs::SequenceElem::new(phoneme, 1.5, 0.5);
-
+	// measure the time it takes to synthesize the audio
     let start = std::time::Instant::now();
 
     // and extend the sound part with it
@@ -225,7 +194,7 @@ fn main() {
         }]
         .select(grail_rs::voices::generic())
         .sequence(grail_rs::DEFAULT_SAMPLE_RATE)
-        .jitter(0, voice)
+        .jitter(0, grail_rs::voices::generic())
         .synthesize(),
     );
 
@@ -233,7 +202,7 @@ fn main() {
 
     // display info on how long the audio file is
     println!(
-        "{} seconds of audio, generated in {} microseconds",
+        "{:.2} seconds of audio, generated in {} microseconds",
         generated_audio.len() as f32 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
         duration
     );
@@ -246,17 +215,15 @@ fn main() {
         save_wav(&output_file, &generated_audio, sample_rate);
     }
 
-    // and play it back, if needed // TODO put this in a function
+    // and play it back, if needed
     if play_sound {
         stream_handle
             .play_raw(SamplesBuffer::new(1, sample_rate, generated_audio.clone()))
             .expect("failed to play audio");
-    }
 
-    // wait till the sound stops playing
-    if play_sound {
-        std::thread::sleep(std::time::Duration::from_secs_f32(
-            (generated_audio.len() as f32 / grail_rs::DEFAULT_SAMPLE_RATE as f32) + 0.5,
-        ));
+		// wait till the sound stops playing
+		std::thread::sleep(std::time::Duration::from_secs_f32(
+			(generated_audio.len() as f32 / grail_rs::DEFAULT_SAMPLE_RATE as f32) + 0.5,
+		));
     }
 }

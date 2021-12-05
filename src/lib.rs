@@ -36,7 +36,7 @@ fn tan_approx(x: f32) -> f32 {
 // next, let's make a struct to help storing arrays, and do operations on them
 
 /// Array, containing NUM_FORMANTS floats. Used to store per-formant data
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct Array {
     /// inner array
     pub x: [f32; NUM_FORMANTS],
@@ -172,7 +172,7 @@ fn random_f32(state: &mut u32) -> f32 {
 // we'll want a way to represent what to synthesize
 
 /// synthesis element, describes what to synthesize
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct SynthesisElem {
     /// base frequency, normalized to sample rate
     pub frequency: f32,
@@ -203,7 +203,7 @@ pub struct SynthesisElem {
 // we want to make one from some sample rate, make one with the given sample rate, and blend them
 impl SynthesisElem {
     /// make a new synthesis element. For unit gain, formant_amp should sum up to 1
-    pub fn new(
+	pub fn new(
         sample_rate: u32,
         frequency: f32,
         formant_freq: [f32; NUM_FORMANTS],
@@ -313,6 +313,7 @@ impl SynthesisElem {
 // for that, we'll use an iterator
 // it keeps track of the filter states, and the underlying iterator to get synthesis elements from
 // if iterators aren't available in the language you are porting to, use a function to get the next item from some state instead
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct Synthesize<T: Iterator<Item = SynthesisElem>> {
     /// underlying iterator
     iter: T,
@@ -389,7 +390,7 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         let x = inp * elem.formant_amp;
 
 		// now, apply the parallel bandpass filter
-		// this is a State Variable Filter
+		// this is a State Variable Filter, from here: https://cytomic.com/files/dsp/SvfLinearTrapOptimised2.pdf
 		// first, the parameters
 		let g = elem.formant_freq.tan_approx();
 
@@ -400,7 +401,6 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
 		let a2 = g * a1;
 
 		// process the filter
-		//let v3 = x - self.formant_state_b;
 		let v1 = a1 * self.formant_state_a + a2 * (x - self.formant_state_b);
 		let v2 = self.formant_state_b + g * v1;
 
@@ -421,7 +421,6 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
 		let a2 = g * a1;
 
 		// process
-		//let v3 = r - self.nasal_state_b;
 		let v1 = a1 * self.nasal_state_a + a2 * (r - self.nasal_state_b);
 		let v2 = self.nasal_state_b + g * v1;
 
@@ -429,7 +428,7 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
 		self.nasal_state_a = 2.0 * v1 - self.nasal_state_a;
 		self.nasal_state_b = 2.0 * v2 - self.nasal_state_b;
 
-		// and the notch result
+		// and the notch result, which is also the final result
 		Some(r - k * v1 * elem.nasal_amp)
     }
 }
@@ -465,7 +464,7 @@ impl<T> IntoSynthesize for T where T: IntoIterator<Item = SynthesisElem> + Sized
 // first, set up the enum for all phonemes
 // TODO: IPA or some reduced set?
 // reducet set makes it easier to make voices
-#[derive(Clone, Copy, Debug)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub enum Phoneme {
     Silence, // Generic silence
     A,       // a
@@ -474,7 +473,7 @@ pub enum Phoneme {
 // next up, a voice storage
 // this is not a full voice, but instead all phonemes, so it's easier to pass around
 // we won't make a constructor for it due to it not really being needed
-#[derive(Clone, Copy, Debug)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct VoiceStorage {
     pub silence: SynthesisElem,
     pub a: SynthesisElem,
@@ -499,7 +498,7 @@ impl VoiceStorage {
 // which is just the voice storage + extra parameters for intonation
 
 /// A voice containing all needed parameters to synthesize sound from some given phonemes
-#[derive(Clone, Copy, Debug)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct Voice {
     /// sample rate this voice is at
     pub sample_rate: u32,
@@ -523,7 +522,7 @@ pub struct Voice {
 // We also want to jitter all frequencies a bit for more realism, so let's do that next
 
 // first, we want to make a few structs to help with generating noise
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 struct ValueNoise {
     current: f32,
     next: f32,
@@ -563,7 +562,7 @@ impl ValueNoise {
 }
 
 // and for arrays too
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 struct ArrayValueNoise {
     current: Array,
     next: Array,
@@ -613,7 +612,7 @@ impl ArrayValueNoise {
 
 // now we can make our jitter work, as getting random numbers is now easier
 // all frequencies are in normalized form, so 1.0 is the sample frequency
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct Jitter<T: Iterator<Item = SynthesisElem>> {
     /// underlying iterator
     iter: T,
@@ -664,8 +663,8 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Jitter<T> {
         elem.frequency += freq * self.delta_frequency;
         elem.formant_freq =
             elem.formant_freq + formant_freq * Array::splat(self.delta_formant_freq);
-        // we don't want it to get *louder*, so make sure it only becomes softer by doing (2 - [-1, 1]) / 2, which results in [0, 1]
-        // we'll then multiply it by the appropriate thing so we can't end up with negative amplitudes for some sounds
+        // we don't want it to get *louder*, so make sure it only becomes softer by doing (1 + [-1, 1]) / 2, which results in [0, 1]
+        // we'll then multiply it by the appropriate amplitude so we can't end up with negative amplitudes for some sounds
         let formant_amp_delta =
             (formant_amp + Array::splat(1.0)) * Array::splat(0.5 * self.delta_amplitude);
 
@@ -717,7 +716,7 @@ impl<T> IntoJitter for T where T: IntoIterator<Item = SynthesisElem> + Sized {}
 // so, we'll create a sequencer that does this
 
 // for this, we'll first need a struct to help with adding the time
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct SequenceElem {
     /// the synthesis element
     pub elem: SynthesisElem,
@@ -741,7 +740,7 @@ impl SequenceElem {
 }
 
 /// Sequencer, given a time and blend time, it generates the right amount of samples
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct Sequencer<T: Iterator<Item = SequenceElem>> {
     /// underlying iterator
     iter: T,
@@ -841,7 +840,7 @@ impl<T> IntoSequencer for T where T: IntoIterator<Item = SequenceElem> + Sized {
 
 // next up, we'll want to go from time + phoneme info to a sequence element, so let's do that
 // first, we'll want a new struct to also store timing info with phonemes
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct PhonemeElem {
     /// the phoneme
     pub phoneme: Phoneme,
@@ -858,7 +857,7 @@ pub struct PhonemeElem {
 
 // and we'll want to make the selector next.
 // this simply selects the right synthesis elem from a voice
-#[derive(Clone, Copy, Debug)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct Selector<T: Iterator<Item = PhonemeElem>> {
     /// underlying iterator
     iter: T,
