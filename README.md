@@ -6,6 +6,14 @@ The goal of this synthesizer is to be as simple as possible, and easy to port to
 
 Still heavy WIP
 
+# Roadmap:
+ - Get the output to be roughly normalized by default
+ - Complete the intonator, can see a few items into the future and adjusts voice based on that (also a ruleset for this?)
+ - Complete the text->phoneme transcription, via a find-and-replace ruleset
+ - Make a macro to generate a language from a language file (and do sorting automatically)
+ - make a better way to make voices
+ - (later) add a way to send commands to change the intonation
+
 # License
 Licensed under either of
 

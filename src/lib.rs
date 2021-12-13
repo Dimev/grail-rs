@@ -20,6 +20,10 @@ pub const NUM_FORMANTS: usize = 12;
 /// the number of formants that are voiced, and don't receive noise as input
 pub const NUM_VOICED_FORMANTS: usize = 8;
 
+/// number of characters stored in the buffer when transcribing
+/// this is effectively the maximum rule length
+pub const TRANSCRIPTION_BUFFER_SIZE: usize = 64;
+
 // and some arithmatic functions
 // these are approximations to help speed things up
 // hyperbolic tangent, x is multiplied by pi
@@ -464,7 +468,7 @@ impl<T> IntoSynthesize for T where T: IntoIterator<Item = SynthesisElem> + Sized
 // first, set up the enum for all phonemes
 // TODO: IPA or some reduced set?
 // reducet set makes it easier to make voices
-#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Phoneme {
     Silence, // Generic silence
     A,       // a
@@ -505,6 +509,9 @@ pub struct Voice {
 
     /// phonemes, to generate sound
     pub phonemes: VoiceStorage,
+
+	/// center frequency for the voice
+	pub center_frequency: f32,
 
     /// frequency at which to jitter things, to improve voice naturalness
     pub jitter_frequency: f32,
@@ -904,8 +911,124 @@ impl<T> IntoSelector for T where T: IntoIterator<Item = PhonemeElem> + Sized {}
 // now, we need to do some more complex stuff again.
 // so far we got most of the sound generating "backend" done, now time for the "frontend"
 // this needs to take in text and convert it into phonemes + timing.
-// we'll first want to define a language, which contains all rules needed for this translation
-// TODO: how?
+// let's first make the rules we use for text -> phoneme
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct TranscriptionRule<'a> {
+
+	/// string to compare agains
+	pub string: &'a str,
+
+	/// phonemes to generate from this
+	pub phonemes: &'a [Phoneme],
+}
+
+// now make the actual language, which is just a set of transcription rules
+pub struct Language<'a> {
+
+	/// rules for the language to transcribe phonemes
+	pub rules: &'a [TranscriptionRule<'a>],
+
+	/// whether the language is case-sensitive
+	pub case_sensitive: bool,
+}
+
+// next up, the intonator.
+// this will add intonation to any phoneme sequence
+pub struct Intonator<T: Iterator<Item = Phoneme>> {
+
+	/// underlying iterator
+	iter: T,
+
+	/// center frequency for the voice
+	center_frequency: f32,
+
+	// inner state
+	// TODO
+}
+
+impl<T: Iterator<Item = Phoneme>> Iterator for Intonator<T> {
+	type Item = PhonemeElem;
+	fn next(&mut self) -> Option<Self::Item> {
+		let phon = self.iter.next()?;
+
+		// TODO: apply intonation
+
+		// TODO: speaking rate
+
+		// TODO: give certain phonemes a length
+
+		Some(PhonemeElem {
+			phoneme: phon,
+			length: 0.5,
+			blend_length: 0.5,
+			frequency: self.center_frequency,
+		})
+	}
+}
+
+pub trait IntoIntonator where Self: IntoIterator<Item = Phoneme> + Sized {
+	fn intonate(self, language: Language, voice: Voice) -> Intonator<Self::IntoIter> {
+		Intonator {
+			iter: self.into_iter(),
+			center_frequency: voice.center_frequency,
+		}
+	}
+}
+
+impl<T> IntoIntonator for T where T: IntoIterator<Item = Phoneme> + Sized {}
+
+// now we want to convert text into phonemes
+// we're going to do this with a find-and-replace ruleset, as defined in language.
+// this is assumed to be sorted, so we can binary search with the prefix, 
+// to figure out the range we need to search in and see if it's too low or too high
+pub struct Transcriber<'a, T: Iterator<Item = char>> {
+
+	/// underlying iterator
+	iter: T,
+
+	/// ruleset to use
+	ruleset: &'a [TranscriptionRule<'a>],
+
+	/// curent minimum found item
+	min: usize,
+
+	/// current maximum found item
+	max: usize, 
+
+	/// buffer for the found chars
+	buffer: [char; TRANSCRIPTION_BUFFER_SIZE],
+
+	/// current size of the buffer
+	buffer_size: usize,
+}
+
+impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
+	type Item = Phoneme;
+	fn next(&mut self) -> Option<Self::Item> {
+
+		// each next:
+		// reset the search range
+		// loop as long as the phoneme buffer is empty
+			// try and get an item
+				// if there is one, add it to the buffer
+				// otherwise, stop looping
+			// with the new item, reduce the search range
+				// if the range is now one item, add the phonemes to the output buffer there
+				// if it's 0, add no match to it
+			
+		// if we have an item in the phoneme buffer, pop it and return it
+		
+		let item = self.iter.next();
+
+		// if we don't have an item, check if we currently have a rule
+		// if so, export it
+
+		// we have an item, now add it to the buffer
+		
+		None
+	}
+}
+
 
 // Here's how it will work
 // synthesizer iterator to generate sound
