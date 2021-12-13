@@ -23,7 +23,7 @@ pub fn generic() -> Voice {
                 0.1,
             ),
         },
-		center_frequency: 100.0 / DEFAULT_SAMPLE_RATE as f32,
+        center_frequency: 100.0 / DEFAULT_SAMPLE_RATE as f32,
         jitter_frequency: 16.0 / DEFAULT_SAMPLE_RATE as f32,
         jitter_delta_frequency: 4.0 / DEFAULT_SAMPLE_RATE as f32,
         jitter_delta_formant_frequency: 4.0 / DEFAULT_SAMPLE_RATE as f32,

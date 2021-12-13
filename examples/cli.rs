@@ -181,7 +181,7 @@ fn main() {
     // synthesize the speech
     let mut generated_audio = Vec::with_capacity(grail_rs::DEFAULT_SAMPLE_RATE as usize * 4);
 
-	// measure the time it takes to synthesize the audio
+    // measure the time it takes to synthesize the audio
     let start = std::time::Instant::now();
 
     // and extend the sound part with it
@@ -221,9 +221,9 @@ fn main() {
             .play_raw(SamplesBuffer::new(1, sample_rate, generated_audio.clone()))
             .expect("failed to play audio");
 
-		// wait till the sound stops playing
-		std::thread::sleep(std::time::Duration::from_secs_f32(
-			(generated_audio.len() as f32 / grail_rs::DEFAULT_SAMPLE_RATE as f32) + 0.5,
-		));
+        // wait till the sound stops playing
+        std::thread::sleep(std::time::Duration::from_secs_f32(
+            (generated_audio.len() as f32 / grail_rs::DEFAULT_SAMPLE_RATE as f32) + 0.5,
+        ));
     }
 }

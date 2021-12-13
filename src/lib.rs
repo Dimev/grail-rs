@@ -7,6 +7,9 @@ use core::ops::{Add, Div, Mul, Sub};
 // we'll want to allow voices to be used from this library
 pub mod voices;
 
+// and languages
+pub mod languages;
+
 // The main file the synth is in
 // first, define some constants
 
@@ -20,6 +23,10 @@ pub const NUM_FORMANTS: usize = 12;
 /// the number of formants that are voiced, and don't receive noise as input
 pub const NUM_VOICED_FORMANTS: usize = 8;
 
+/// number of phonemes stored during transcription
+/// This also effectively limits how many phonemes can be in a transcription rule
+pub const PHONEME_BUFFER_SIZE: usize = 64;
+
 /// number of characters stored in the buffer when transcribing
 /// this is effectively the maximum rule length
 pub const TRANSCRIPTION_BUFFER_SIZE: usize = 64;
@@ -28,13 +35,12 @@ pub const TRANSCRIPTION_BUFFER_SIZE: usize = 64;
 // these are approximations to help speed things up
 // hyperbolic tangent, x is multiplied by pi
 fn tan_approx(x: f32) -> f32 {
-
-	// tan(x) = sin(x) / cos(x)
-	// we can approximate sin and x with the bhaskara I approximation quite well
-	// which is 16x(pi - x) / 5pi^2 - 4x(pi - x) for sin
-	// if we fill it in, multiply pi by and rewrite it, we get this:
-	((1.0 - x) * x * (5.0 - 4.0 * (x + 0.5) * (0.5 - x))) / ((x + 0.5) * (5.0 - 4.0 * (1.0 - x) * x) * (0.5 - x))
-
+    // tan(x) = sin(x) / cos(x)
+    // we can approximate sin and x with the bhaskara I approximation quite well
+    // which is 16x(pi - x) / 5pi^2 - 4x(pi - x) for sin
+    // if we fill it in, multiply pi by and rewrite it, we get this:
+    ((1.0 - x) * x * (5.0 - 4.0 * (x + 0.5) * (0.5 - x)))
+        / ((x + 0.5) * (5.0 - 4.0 * (1.0 - x) * x) * (0.5 - x))
 }
 
 // next, let's make a struct to help storing arrays, and do operations on them
@@ -82,15 +88,15 @@ impl Array {
         res
     }
 
-	/// hyperbolic tangent approximation
-	#[inline]
-	pub fn tan_approx(self) -> Self {
-		let mut res = self;
-		for i in 0..NUM_FORMANTS {
-			res.x[i] = tan_approx(res.x[i])
-		}
-		res
-	}
+    /// hyperbolic tangent approximation
+    #[inline]
+    pub fn tan_approx(self) -> Self {
+        let mut res = self;
+        for i in 0..NUM_FORMANTS {
+            res.x[i] = tan_approx(res.x[i])
+        }
+        res
+    }
 }
 
 // and arithmatic
@@ -207,7 +213,7 @@ pub struct SynthesisElem {
 // we want to make one from some sample rate, make one with the given sample rate, and blend them
 impl SynthesisElem {
     /// make a new synthesis element. For unit gain, formant_amp should sum up to 1
-	pub fn new(
+    pub fn new(
         sample_rate: u32,
         frequency: f32,
         formant_freq: [f32; NUM_FORMANTS],
@@ -384,7 +390,7 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
                 *elem = pulse;
             }
 
-			// TODO: FIGURE OUT PROPER LOUDNESS FOR THE FILTER
+            // TODO: FIGURE OUT PROPER LOUDNESS FOR THE FILTER
 
             // and return the array to put it in x
             arr
@@ -393,47 +399,47 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         // make sure it's loud enough
         let x = inp * elem.formant_amp;
 
-		// now, apply the parallel bandpass filter
-		// this is a State Variable Filter, from here: https://cytomic.com/files/dsp/SvfLinearTrapOptimised2.pdf
-		// first, the parameters
-		let g = elem.formant_freq.tan_approx();
+        // now, apply the parallel bandpass filter
+        // this is a State Variable Filter, from here: https://cytomic.com/files/dsp/SvfLinearTrapOptimised2.pdf
+        // first, the parameters
+        let g = elem.formant_freq.tan_approx();
 
-		// stuff needed to make the filter parameters
-		// k = 1 / Q, and bandwidth = frequency / Q, so rewrite it to get k from the bandwidth and freq
-		let k = elem.formant_bw  / elem.formant_freq;
-		let a1 = Array::splat(1.0) / (Array::splat(1.0) + g * (g + k));
-		let a2 = g * a1;
+        // stuff needed to make the filter parameters
+        // k = 1 / Q, and bandwidth = frequency / Q, so rewrite it to get k from the bandwidth and freq
+        let k = elem.formant_bw / elem.formant_freq;
+        let a1 = Array::splat(1.0) / (Array::splat(1.0) + g * (g + k));
+        let a2 = g * a1;
 
-		// process the filter
-		let v1 = a1 * self.formant_state_a + a2 * (x - self.formant_state_b);
-		let v2 = self.formant_state_b + g * v1;
+        // process the filter
+        let v1 = a1 * self.formant_state_a + a2 * (x - self.formant_state_b);
+        let v2 = self.formant_state_b + g * v1;
 
-		// update the state
-		self.formant_state_a = Array::splat(2.0) * v1 - self.formant_state_a;
-		self.formant_state_b = Array::splat(2.0) * v2 - self.formant_state_b;
+        // update the state
+        self.formant_state_a = Array::splat(2.0) * v1 - self.formant_state_a;
+        self.formant_state_b = Array::splat(2.0) * v2 - self.formant_state_b;
 
-		// we're interested in the bandpass result here
-		// which is just v1
-		let r = v1.sum();
+        // we're interested in the bandpass result here
+        // which is just v1
+        let r = v1.sum();
 
-		// now, do the same to get the notch filter
-		let g = tan_approx(elem.nasal_freq);
+        // now, do the same to get the notch filter
+        let g = tan_approx(elem.nasal_freq);
 
-		// parameters
-		let k = elem.nasal_bw / elem.nasal_freq;
-		let a1 = 1.0 / (1.0 + g * (g + k));
-		let a2 = g * a1;
+        // parameters
+        let k = elem.nasal_bw / elem.nasal_freq;
+        let a1 = 1.0 / (1.0 + g * (g + k));
+        let a2 = g * a1;
 
-		// process
-		let v1 = a1 * self.nasal_state_a + a2 * (r - self.nasal_state_b);
-		let v2 = self.nasal_state_b + g * v1;
+        // process
+        let v1 = a1 * self.nasal_state_a + a2 * (r - self.nasal_state_b);
+        let v2 = self.nasal_state_b + g * v1;
 
-		// update
-		self.nasal_state_a = 2.0 * v1 - self.nasal_state_a;
-		self.nasal_state_b = 2.0 * v2 - self.nasal_state_b;
+        // update
+        self.nasal_state_a = 2.0 * v1 - self.nasal_state_a;
+        self.nasal_state_b = 2.0 * v2 - self.nasal_state_b;
 
-		// and the notch result, which is also the final result
-		Some(r - k * v1 * elem.nasal_amp)
+        // and the notch result, which is also the final result
+        Some(r - k * v1 * elem.nasal_amp)
     }
 }
 
@@ -470,8 +476,9 @@ impl<T> IntoSynthesize for T where T: IntoIterator<Item = SynthesisElem> + Sized
 // reducet set makes it easier to make voices
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Phoneme {
-    Silence, // Generic silence
-    A,       // a
+    /// Silence, somewhat special as blending the phoneme to this will only blend the amplitude
+    Silence,
+    A, // a
 }
 
 // next up, a voice storage
@@ -479,6 +486,7 @@ pub enum Phoneme {
 // we won't make a constructor for it due to it not really being needed
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct VoiceStorage {
+    /// silence, here for completeness as it's not actually used in synthesis
     pub silence: SynthesisElem,
     pub a: SynthesisElem,
 }
@@ -510,8 +518,8 @@ pub struct Voice {
     /// phonemes, to generate sound
     pub phonemes: VoiceStorage,
 
-	/// center frequency for the voice
-	pub center_frequency: f32,
+    /// center frequency for the voice
+    pub center_frequency: f32,
 
     /// frequency at which to jitter things, to improve voice naturalness
     pub jitter_frequency: f32,
@@ -864,6 +872,7 @@ pub struct PhonemeElem {
 
 // and we'll want to make the selector next.
 // this simply selects the right synthesis elem from a voice
+// as well as makes sure a silence is blended correctly
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct Selector<T: Iterator<Item = PhonemeElem>> {
     /// underlying iterator
@@ -882,6 +891,8 @@ impl<T: Iterator<Item = PhonemeElem>> Iterator for Selector<T> {
 
         // get the right synthesis elem for this phoneme
         let elem = self.voice_storage.get(phoneme.phoneme);
+
+        // TODO: when the next one is a silence, copy this one but silent to there
 
         // and put it in a sequence element
         Some(SequenceElem::new(
@@ -914,121 +925,185 @@ impl<T> IntoSelector for T where T: IntoIterator<Item = PhonemeElem> + Sized {}
 // let's first make the rules we use for text -> phoneme
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct TranscriptionRule<'a> {
+    /// string to compare agains
+    pub string: &'a str,
 
-	/// string to compare agains
-	pub string: &'a str,
-
-	/// phonemes to generate from this
-	pub phonemes: &'a [Phoneme],
+    /// phonemes to generate from this
+    pub phonemes: &'a [Phoneme],
 }
 
 // now make the actual language, which is just a set of transcription rules
 pub struct Language<'a> {
+    /// rules for the language to transcribe phonemes
+    pub rules: &'a [TranscriptionRule<'a>],
 
-	/// rules for the language to transcribe phonemes
-	pub rules: &'a [TranscriptionRule<'a>],
-
-	/// whether the language is case-sensitive
-	pub case_sensitive: bool,
+    /// whether the language is case-sensitive
+    pub case_sensitive: bool,
 }
 
 // next up, the intonator.
 // this will add intonation to any phoneme sequence
 pub struct Intonator<T: Iterator<Item = Phoneme>> {
+    /// underlying iterator
+    iter: T,
 
-	/// underlying iterator
-	iter: T,
-
-	/// center frequency for the voice
-	center_frequency: f32,
-
-	// inner state
-	// TODO
+    /// center frequency for the voice
+    center_frequency: f32,
+    // inner state
+    // TODO
 }
 
 impl<T: Iterator<Item = Phoneme>> Iterator for Intonator<T> {
-	type Item = PhonemeElem;
-	fn next(&mut self) -> Option<Self::Item> {
-		let phon = self.iter.next()?;
+    type Item = PhonemeElem;
+    fn next(&mut self) -> Option<Self::Item> {
+        let phon = self.iter.next()?;
 
-		// TODO: apply intonation
+        // TODO: apply intonation
 
-		// TODO: speaking rate
+        // TODO: speaking rate
 
-		// TODO: give certain phonemes a length
+        // TODO: give certain phonemes a length
 
-		Some(PhonemeElem {
-			phoneme: phon,
-			length: 0.5,
-			blend_length: 0.5,
-			frequency: self.center_frequency,
-		})
-	}
+        Some(PhonemeElem {
+            phoneme: phon,
+            length: 0.5,
+            blend_length: 0.5,
+            frequency: self.center_frequency,
+        })
+    }
 }
 
-pub trait IntoIntonator where Self: IntoIterator<Item = Phoneme> + Sized {
-	fn intonate(self, language: Language, voice: Voice) -> Intonator<Self::IntoIter> {
-		Intonator {
-			iter: self.into_iter(),
-			center_frequency: voice.center_frequency,
-		}
-	}
+pub trait IntoIntonator
+where
+    Self: IntoIterator<Item = Phoneme> + Sized,
+{
+    fn intonate(self, language: Language, voice: Voice) -> Intonator<Self::IntoIter> {
+        Intonator {
+            iter: self.into_iter(),
+            center_frequency: voice.center_frequency,
+        }
+    }
 }
 
 impl<T> IntoIntonator for T where T: IntoIterator<Item = Phoneme> + Sized {}
 
 // now we want to convert text into phonemes
 // we're going to do this with a find-and-replace ruleset, as defined in language.
-// this is assumed to be sorted, so we can binary search with the prefix, 
+// this is assumed to be sorted, so we can binary search with the prefix,
 // to figure out the range we need to search in and see if it's too low or too high
 pub struct Transcriber<'a, T: Iterator<Item = char>> {
+    /// underlying iterator
+    iter: T,
 
-	/// underlying iterator
-	iter: T,
+    /// ruleset to use
+    ruleset: &'a [TranscriptionRule<'a>],
 
-	/// ruleset to use
-	ruleset: &'a [TranscriptionRule<'a>],
+    /// whether we are case sensitive to match
+    case_sensitive: bool,
 
-	/// curent minimum found item
-	min: usize,
+    /// buffer for the phonemes we have now
+    buffer: [Phoneme; PHONEME_BUFFER_SIZE],
 
-	/// current maximum found item
-	max: usize, 
-
-	/// buffer for the found chars
-	buffer: [char; TRANSCRIPTION_BUFFER_SIZE],
-
-	/// current size of the buffer
-	buffer_size: usize,
+    /// current size of the buffer
+    buffer_size: usize,
 }
 
 impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
-	type Item = Phoneme;
-	fn next(&mut self) -> Option<Self::Item> {
+    type Item = Phoneme;
+    fn next(&mut self) -> Option<Self::Item> {
 
-		// each next:
-		// reset the search range
-		// loop as long as the phoneme buffer is empty
-			// try and get an item
-				// if there is one, add it to the buffer
-				// otherwise, stop looping
-			// with the new item, reduce the search range
-				// if the range is now one item, add the phonemes to the output buffer there
-				// if it's 0, add no match to it
-			
-		// if we have an item in the phoneme buffer, pop it and return it
-		
-		let item = self.iter.next();
+        // min and max search range
+        let mut search_min = 0;
+        let mut search_max = self.ruleset.len();
 
-		// if we don't have an item, check if we currently have a rule
-		// if so, export it
+        // buffer to store our text, to see what the current rule is
+        let mut text_buffer = [' '; TRANSCRIPTION_BUFFER_SIZE];
+        let mut text_buffer_size = 0;
 
-		// we have an item, now add it to the buffer
-		
-		None
-	}
+        // loop as long as we need a phoneme
+        while self.buffer_size == 0 {
+            // try and get an item
+            if let Some(character) = self.iter.next() {
+                // add it to the buffer if possible
+                if text_buffer_size < text_buffer.len() {
+					// make sure it's the right case
+                    text_buffer[text_buffer_size] = if self.case_sensitive {
+                        character.to_ascii_lowercase()
+                    } else {
+                        character
+                    };
+                    text_buffer_size += 1;
+                }
+            } else {
+                // we won't find a new rule, so stop
+                break;
+            }
+
+            // now that we have a new item, we can reduce the search range
+            // this is binary search, where the left half is where the lower range is lexiographically lower than the current buffer content
+            let new_min = self.ruleset[search_min..search_max].partition_point(|x| {
+                x.string
+                    .chars()
+                    .take(text_buffer_size)
+                    .lt(text_buffer[..text_buffer_size].iter().cloned())
+            }) + search_min;
+
+            // same for the upper range, but now it's lower or equal
+            let new_max = self.ruleset[search_min..search_max].partition_point(|x| {
+                x.string
+                    .chars()
+                    .take(text_buffer_size)
+                    .le(text_buffer[..text_buffer_size].iter().cloned())
+            }) + search_min;
+
+            // if the ranges are equal, no rule was found, so insert a silence
+            if new_min == new_max && self.buffer_size < self.buffer.len() {
+                self.buffer[self.buffer_size] = Phoneme::Silence;
+                self.buffer_size += 1;
+            } else if new_min + 1 == new_max {
+                // if it's one, then we found a rule, so add it
+                for phoneme in self.ruleset[new_min]
+                    .phonemes
+                    .iter()
+                    .take(self.buffer.len() - self.buffer_size)
+                {
+                    self.buffer[self.buffer_size] = *phoneme;
+                    self.buffer_size += 1;
+                }
+            }
+
+            // and set the range for the next iteration
+            search_min = new_min;
+            search_max = new_max;
+        }
+
+        // if we have items in the phoneme buffer, return one
+        if self.buffer_size > 0 {
+            // pop the item
+            self.buffer_size -= 1;
+            Some(self.buffer[self.buffer_size + 1])
+        } else {
+            None
+        }
+    }
 }
 
+pub trait IntoTranscriber
+where
+    Self: IntoIterator<Item = char> + Sized,
+{
+    fn transcribe(self, language: Language) -> Transcriber<Self::IntoIter> {
+        Transcriber {
+            iter: self.into_iter(),
+            ruleset: language.rules,
+			buffer: [Phoneme::Silence; PHONEME_BUFFER_SIZE],
+			buffer_size: 0,
+			case_sensitive: language.case_sensitive,
+        }
+    }
+}
+
+impl<T> IntoTranscriber for T where T: IntoIterator<Item = char> + Sized {}
 
 // Here's how it will work
 // synthesizer iterator to generate sound
