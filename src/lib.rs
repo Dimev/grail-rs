@@ -880,6 +880,9 @@ pub struct Selector<T: Iterator<Item = PhonemeElem>> {
 
     /// underlying voice storage to get voice data from
     voice_storage: VoiceStorage,
+
+    // previous item, to handle silence properly
+    prev_item: Phoneme,
 }
 
 impl<T: Iterator<Item = PhonemeElem>> Iterator for Selector<T> {
@@ -889,10 +892,17 @@ impl<T: Iterator<Item = PhonemeElem>> Iterator for Selector<T> {
         // get the next item if we can
         let phoneme = self.iter.next()?;
 
-        // get the right synthesis elem for this phoneme
-        let elem = self.voice_storage.get(phoneme.phoneme);
+        // TODO: check, might not work 100% of the time, especially on voice start
+        // change behavior if the current one is a silence. If it is, we nicely want to blend into silence
+        let elem = if let Phoneme::Silence = phoneme.phoneme {
+            // blend from the previous one, but instead as silent
+            self.voice_storage.get(self.prev_item).copy_silent()
+        } else {
+            self.voice_storage.get(phoneme.phoneme)
+        };
 
-        // TODO: when the next one is a silence, copy this one but silent to there
+        // set the previous phoneme
+        self.prev_item = phoneme.phoneme;
 
         // and put it in a sequence element
         Some(SequenceElem::new(
@@ -912,6 +922,7 @@ where
         Selector {
             iter: self.into_iter(),
             voice_storage: voice.phonemes,
+            prev_item: Phoneme::A,
         }
     }
 }
@@ -949,8 +960,6 @@ pub struct Intonator<T: Iterator<Item = Phoneme>> {
 
     /// center frequency for the voice
     center_frequency: f32,
-    // inner state
-    // TODO
 }
 
 impl<T: Iterator<Item = Phoneme>> Iterator for Intonator<T> {
@@ -1011,7 +1020,6 @@ pub struct Transcriber<'a, T: Iterator<Item = char>> {
 impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
     type Item = Phoneme;
     fn next(&mut self) -> Option<Self::Item> {
-
         // min and max search range
         let mut search_min = 0;
         let mut search_max = self.ruleset.len();
@@ -1026,7 +1034,7 @@ impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
             if let Some(character) = self.iter.next() {
                 // add it to the buffer if possible
                 if text_buffer_size < text_buffer.len() {
-					// make sure it's the right case
+                    // make sure it's the right case
                     text_buffer[text_buffer_size] = if self.case_sensitive {
                         character.to_ascii_lowercase()
                     } else {
@@ -1070,6 +1078,9 @@ impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
                     self.buffer[self.buffer_size] = *phoneme;
                     self.buffer_size += 1;
                 }
+                // also empty the buffer
+                // this is to ensure we can continue parsing if this rule doesn't produce phonemes
+                text_buffer_size = 0;
             }
 
             // and set the range for the next iteration
@@ -1081,7 +1092,7 @@ impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
         if self.buffer_size > 0 {
             // pop the item
             self.buffer_size -= 1;
-            Some(self.buffer[self.buffer_size + 1])
+            Some(self.buffer[self.buffer_size])
         } else {
             None
         }
@@ -1096,9 +1107,9 @@ where
         Transcriber {
             iter: self.into_iter(),
             ruleset: language.rules,
-			buffer: [Phoneme::Silence; PHONEME_BUFFER_SIZE],
-			buffer_size: 0,
-			case_sensitive: language.case_sensitive,
+            buffer: [Phoneme::Silence; PHONEME_BUFFER_SIZE],
+            buffer_size: 1,
+            case_sensitive: language.case_sensitive,
         }
     }
 }

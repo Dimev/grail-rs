@@ -1,4 +1,6 @@
-use grail_rs::{IntoJitter, IntoSelector, IntoSequencer, IntoSynthesize};
+use grail_rs::{
+    IntoIntonator, IntoJitter, IntoSelector, IntoSequencer, IntoSynthesize, IntoTranscriber,
+};
 use rodio::{buffer::SamplesBuffer, OutputStream};
 use std::env;
 use std::fs::File;
@@ -186,16 +188,17 @@ fn main() {
 
     // and extend the sound part with it
     generated_audio.extend(
-        [grail_rs::PhonemeElem {
-            phoneme: grail_rs::Phoneme::A,
-            length: 2.0,
-            blend_length: 0.2,
-            frequency: 100.0 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
-        }]
-        .select(grail_rs::voices::generic())
-        .sequence(grail_rs::DEFAULT_SAMPLE_RATE)
-        .jitter(0, grail_rs::voices::generic())
-        .synthesize(),
+        to_say
+            .chars()
+            .transcribe(grail_rs::languages::generic())
+            .inspect(|x| {
+                dbg!(x);
+            })
+            .intonate(grail_rs::languages::generic(), grail_rs::voices::generic())
+            .select(grail_rs::voices::generic())
+            .sequence(grail_rs::DEFAULT_SAMPLE_RATE)
+            .jitter(0, grail_rs::voices::generic())
+            .synthesize(),
     );
 
     let duration = start.elapsed().as_micros();
