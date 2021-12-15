@@ -1,4 +1,4 @@
-#![no_std]
+// #![no_std]
 #![forbid(unsafe_code)]
 
 // we'll want to implement these for arrays
@@ -235,6 +235,20 @@ impl SynthesisElem {
             softness,
         }
     }
+
+	/// create a new silent item
+	pub fn silent() -> Self {
+		Self {
+			frequency: 0.0,
+			formant_freq: Array::splat(0.5),
+			formant_bw: Array::splat(0.5),
+			formant_amp: Array::splat(0.0),
+			nasal_freq: 0.5,
+			nasal_bw: 0.5,
+			nasal_amp: 0.0,
+			softness: 0.0,
+		}
+	}
 
     /// make a new one with the default sample rate, and unit gain
     pub fn new_phoneme(
@@ -883,6 +897,9 @@ pub struct Selector<T: Iterator<Item = PhonemeElem>> {
 
     // previous item, to handle silence properly
     prev_item: Phoneme,
+
+	// and the next one
+	next_item: Phoneme,
 }
 
 impl<T: Iterator<Item = PhonemeElem>> Iterator for Selector<T> {
@@ -894,10 +911,12 @@ impl<T: Iterator<Item = PhonemeElem>> Iterator for Selector<T> {
 
         // TODO: check, might not work 100% of the time, especially on voice start
         // change behavior if the current one is a silence. If it is, we nicely want to blend into silence
-        let elem = if let Phoneme::Silence = phoneme.phoneme {
+        let elem = if Phoneme::Silence == phoneme.phoneme {
             // blend from the previous one, but instead as silent
+			println!("Silent, prev was: {:?}", self.prev_item);
             self.voice_storage.get(self.prev_item).copy_silent()
         } else {
+			println!("Current: {:?}, prev was: {:?}", phoneme.phoneme, self.prev_item);
             self.voice_storage.get(phoneme.phoneme)
         };
 
@@ -922,7 +941,8 @@ where
         Selector {
             iter: self.into_iter(),
             voice_storage: voice.phonemes,
-            prev_item: Phoneme::A,
+            prev_item: Phoneme::Silence,
+			next_item: Phoneme::Silence,
         }
     }
 }

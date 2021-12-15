@@ -191,9 +191,6 @@ fn main() {
         to_say
             .chars()
             .transcribe(grail_rs::languages::generic())
-            .inspect(|x| {
-                dbg!(x);
-            })
             .intonate(grail_rs::languages::generic(), grail_rs::voices::generic())
             .select(grail_rs::voices::generic())
             .sequence(grail_rs::DEFAULT_SAMPLE_RATE)
