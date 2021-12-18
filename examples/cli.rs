@@ -55,7 +55,7 @@ fn save_wav(path: &str, data: &[f32], sample_rate: u32) {
         // byte rate, sample rate * num channels * bytes per sample
         file.write(&(sample_rate as i32 * 2).to_le_bytes());
 
-        // block align, num channels * bits per sample
+        // block align, num channels * bytes per sample
         file.write(&(2 as i16).to_le_bytes());
 
         // bits per sample
