@@ -239,12 +239,12 @@ impl SynthesisElem {
 	/// create a new silent item
 	pub fn silent() -> Self {
 		Self {
-			frequency: 0.0,
-			formant_freq: Array::splat(0.5),
-			formant_bw: Array::splat(0.5),
+			frequency: 0.25,
+			formant_freq: Array::splat(0.25),
+			formant_bw: Array::splat(0.25),
 			formant_amp: Array::splat(0.0),
-			nasal_freq: 0.5,
-			nasal_bw: 0.5,
+			nasal_freq: 0.25,
+			nasal_bw: 0.25,
 			nasal_amp: 0.0,
 			softness: 0.0,
 		}
@@ -500,23 +500,20 @@ pub enum Phoneme {
 // we won't make a constructor for it due to it not really being needed
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct VoiceStorage {
-    /// silence, here for completeness as it's not actually used in synthesis
-    pub silence: SynthesisElem,
     pub a: SynthesisElem,
 }
 
 impl VoiceStorage {
     /// retreive a synthesis elem based on the given phoneme
-    pub fn get(self, phoneme: Phoneme) -> SynthesisElem {
+    pub fn get(self, phoneme: Phoneme) -> Option<SynthesisElem> {
         match phoneme {
-            Phoneme::Silence => self.silence,
-            Phoneme::A => self.a,
+            Phoneme::Silence => None,
+            Phoneme::A => Some(self.a),
         }
     }
 
     /// run a function on all phonemes
     pub fn map(&mut self, func: fn(Phoneme, &mut SynthesisElem)) {
-        func(Phoneme::Silence, &mut self.silence);
         func(Phoneme::A, &mut self.a);
     }
 }
@@ -748,7 +745,8 @@ impl<T> IntoJitter for T where T: IntoIterator<Item = SynthesisElem> + Sized {}
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct SequenceElem {
     /// the synthesis element
-    pub elem: SynthesisElem,
+	/// Some if there, None if silent
+    pub elem: Option<SynthesisElem>,
 
     /// time this element lasts for
     pub length: f32,
@@ -759,7 +757,7 @@ pub struct SequenceElem {
 
 impl SequenceElem {
     /// make a new element
-    pub fn new(elem: SynthesisElem, length: f32, blend_length: f32) -> Self {
+    pub fn new(elem: Option<SynthesisElem>, length: f32, blend_length: f32) -> Self {
         Self {
             elem,
             length,
@@ -820,26 +818,42 @@ impl<T: Iterator<Item = SequenceElem>> Iterator for Sequencer<T> {
                 _ => return None,
             }
         }
-
+	
         // and match on what to do
-        match (self.cur_elem, self.next_elem) {
-            // both elements, blend to the next one
-            (Some(a), Some(b)) => {
+        match (self.cur_elem, self.cur_elem.and_then(|x| x.elem), self.next_elem.and_then(|x| x.elem)) {
+            // both elements, all are on
+            (Some(a), Some(b), Some(c)) => {
                 // get the blend amount
                 let alpha = (self.time / a.blend_length).min(1.0);
 
                 // and blend the 2, because alpha goes from 1 to 0, we need to blend in the other order
-                Some(b.elem.blend(a.elem, alpha))
+                Some(c.blend(b, alpha))
             }
 
-            // only the first one, blend to the end
-            (Some(a), None) => {
+            // only the first one, blend to silence
+            (Some(a), Some(b), None) => {
                 // get the blend amount
                 let alpha = (self.time / a.blend_length).min(1.0);
 
                 // and blend with a silent one
-                Some(a.elem.copy_silent().blend(a.elem, alpha))
+                Some(b.copy_silent().blend(b, alpha))
             }
+
+			// only the first one, blend from silence
+			(Some(a), None, Some(c)) => {
+                // get the blend amount
+                let alpha = (self.time / a.blend_length).min(1.0);
+
+                // and blend with a silent one
+                Some(c.blend(c.copy_silent(), alpha))
+            }
+
+			// both silent
+			(Some(_), None, None) => {
+
+				// just return silence
+				Some(SynthesisElem::silent())
+			}
 
             // nothing else, return none
             _ => None,
@@ -894,12 +908,6 @@ pub struct Selector<T: Iterator<Item = PhonemeElem>> {
 
     /// underlying voice storage to get voice data from
     voice_storage: VoiceStorage,
-
-    // previous item, to handle silence properly
-    prev_item: Phoneme,
-
-	// and the next one
-	next_item: Phoneme,
 }
 
 impl<T: Iterator<Item = PhonemeElem>> Iterator for Selector<T> {
@@ -909,23 +917,14 @@ impl<T: Iterator<Item = PhonemeElem>> Iterator for Selector<T> {
         // get the next item if we can
         let phoneme = self.iter.next()?;
 
-        // TODO: check, might not work 100% of the time, especially on voice start
-        // change behavior if the current one is a silence. If it is, we nicely want to blend into silence
-        let elem = if Phoneme::Silence == phoneme.phoneme {
-            // blend from the previous one, but instead as silent
-			println!("Silent, prev was: {:?}", self.prev_item);
-            self.voice_storage.get(self.prev_item).copy_silent()
-        } else {
-			println!("Current: {:?}, prev was: {:?}", phoneme.phoneme, self.prev_item);
-            self.voice_storage.get(phoneme.phoneme)
-        };
-
-        // set the previous phoneme
-        self.prev_item = phoneme.phoneme;
+		// get the right phoneme, or none if it's silent.
+		// this allows correct blending later on
+        let elem = self.voice_storage.get(phoneme.phoneme);
 
         // and put it in a sequence element
         Some(SequenceElem::new(
-            elem.copy_with_frequency(phoneme.frequency),
+			// if there is any, copy it with the right frequency
+            elem.map(|x| x.copy_with_frequency(phoneme.frequency)),
             phoneme.length,
             phoneme.blend_length,
         ))
@@ -941,8 +940,6 @@ where
         Selector {
             iter: self.into_iter(),
             voice_storage: voice.phonemes,
-            prev_item: Phoneme::Silence,
-			next_item: Phoneme::Silence,
         }
     }
 }

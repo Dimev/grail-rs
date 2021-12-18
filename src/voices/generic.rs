@@ -7,7 +7,6 @@ pub fn generic() -> Voice {
     Voice {
         sample_rate: DEFAULT_SAMPLE_RATE,
         phonemes: VoiceStorage {
-            silence: SynthesisElem::silent(),
             a: MKPHON(
                 [
                     810.0, 1271.0, 2851.0, 3213.0, 1.0, 1.0, 1.0, 1.0, 1200.0, 2000.0, 3000.0,
