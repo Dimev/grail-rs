@@ -8,6 +8,7 @@ pub const MKPHON: fn(
     [f32; NUM_FORMANTS],
     [f32; NUM_FORMANTS],
     [f32; NUM_FORMANTS],
+	[f32; NUM_FORMANTS],
     f32,
     f32,
     f32,

@@ -20,9 +20,6 @@ pub const DEFAULT_SAMPLE_RATE: u32 = 44100;
 /// the number of formants to synthesize
 pub const NUM_FORMANTS: usize = 12;
 
-/// the number of formants that are voiced, and don't receive noise as input
-pub const NUM_VOICED_FORMANTS: usize = 8;
-
 /// number of phonemes stored during transcription
 /// This also effectively limits how many phonemes can be in a transcription rule
 pub const PHONEME_BUFFER_SIZE: usize = 64;
@@ -34,7 +31,10 @@ pub const TRANSCRIPTION_BUFFER_SIZE: usize = 64;
 // and some arithmatic functions
 // these are approximations to help speed things up
 // hyperbolic tangent, x is multiplied by pi
-fn tan_approx(x: f32) -> f32 {
+/// Approximation of the hyperbolic tangent, tan(pi*x).
+/// Approximation is good for x = [0.0; 0.5]
+#[inline]
+pub fn tan_approx(x: f32) -> f32 {
     // tan(x) = sin(x) / cos(x)
     // we can approximate sin and x with the bhaskara I approximation quite well
     // which is 16x(pi - x) / 5pi^2 - 4x(pi - x) for sin
@@ -155,7 +155,7 @@ impl Div for Array {
 
 // and, a helper function to do random number generation
 
-/// generates a random float, and changes the state after doing so
+/// generates a random float in the range [-1, 1], and changes the state after doing so
 #[inline]
 fn random_f32(state: &mut u32) -> f32 {
     // here we change the state with a regular integer rng
@@ -196,6 +196,9 @@ pub struct SynthesisElem {
     /// formant amplitudes. If these sum up to one, the output amplitude will also be one
     pub formant_amp: Array,
 
+	/// how breathy each formant is. 0 means fully voiced, 1 means full breath
+	pub formant_breath: Array,
+
     /// antiresonator frequency, normalized to sample rate
     pub nasal_freq: f32,
 
@@ -219,6 +222,7 @@ impl SynthesisElem {
         formant_freq: [f32; NUM_FORMANTS],
         formant_bw: [f32; NUM_FORMANTS],
         formant_amp: [f32; NUM_FORMANTS],
+		formant_breath: [f32; NUM_FORMANTS],
         nasal_freq: f32,
         nasal_bw: f32,
         nasal_amp: f32,
@@ -229,6 +233,7 @@ impl SynthesisElem {
             formant_freq: Array::new(formant_freq) / Array::splat(sample_rate as f32),
             formant_bw: Array::new(formant_bw) / Array::splat(sample_rate as f32),
             formant_amp: Array::new(formant_amp),
+			formant_breath: Array::new(formant_breath),
             nasal_freq: nasal_freq / sample_rate as f32,
             nasal_bw: nasal_bw / sample_rate as f32,
             nasal_amp,
@@ -243,6 +248,7 @@ impl SynthesisElem {
             formant_freq: Array::splat(0.25),
             formant_bw: Array::splat(0.25),
             formant_amp: Array::splat(0.0),
+			formant_breath: Array::splat(0.0),
             nasal_freq: 0.25,
             nasal_bw: 0.25,
             nasal_amp: 0.0,
@@ -255,6 +261,7 @@ impl SynthesisElem {
         formant_freq: [f32; NUM_FORMANTS],
         formant_bw: [f32; NUM_FORMANTS],
         formant_amp: [f32; NUM_FORMANTS],
+		formant_breath: [f32; NUM_FORMANTS],
         nasal_freq: f32,
         nasal_bw: f32,
         nasal_amp: f32,
@@ -266,6 +273,7 @@ impl SynthesisElem {
             formant_bw: Array::new(formant_bw) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
             // divide it by the sum of the entire amplitudes, that way we get unit gain
             formant_amp: Array::new(formant_amp) / Array::splat(Array::new(formant_amp).sum()),
+			formant_breath: Array::new(formant_breath),
             nasal_freq: nasal_freq / DEFAULT_SAMPLE_RATE as f32,
             nasal_bw: nasal_bw / DEFAULT_SAMPLE_RATE as f32,
             nasal_amp,
@@ -280,6 +288,7 @@ impl SynthesisElem {
             formant_freq: self.formant_freq.blend(other.formant_freq, alpha),
             formant_bw: self.formant_bw.blend(other.formant_bw, alpha),
             formant_amp: self.formant_amp.blend(other.formant_amp, alpha),
+			formant_breath: self.formant_breath.blend(other.formant_breath, alpha),
             nasal_freq: self.nasal_freq * (1.0 - alpha) + other.nasal_freq * alpha,
             nasal_bw: self.nasal_bw * (1.0 - alpha) + other.nasal_bw * alpha,
             nasal_amp: self.nasal_amp * (1.0 - alpha) + other.nasal_amp * alpha,
@@ -394,21 +403,8 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         // and also generate the noise
         let noise = random_f32(&mut self.seed);
 
-        // now put these in an array, this way avoids using mut directly
-        let inp = Array::new({
-            // fill it with noise
-            let mut arr = [noise; NUM_FORMANTS];
-
-            // and set the first n to the pulse
-            for elem in arr.iter_mut().take(NUM_VOICED_FORMANTS) {
-                *elem = pulse;
-            }
-
-            // TODO: FIGURE OUT PROPER LOUDNESS FOR THE FILTER
-
-            // and return the array to put it in x
-            arr
-        });
+		// blend the wave and noise to control the breathiness
+		let inp = Array::splat(wave) * (Array::splat(1.0) - elem.formant_breath) + Array::splat(noise) * elem.formant_breath;
 
         // make sure it's loud enough
         let x = inp * elem.formant_amp;
