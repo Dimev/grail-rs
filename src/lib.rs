@@ -404,7 +404,7 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         let noise = random_f32(&mut self.seed);
 
 		// blend the wave and noise to control the breathiness
-		let inp = Array::splat(wave) * (Array::splat(1.0) - elem.formant_breath) + Array::splat(noise) * elem.formant_breath;
+		let inp = Array::splat(pulse) * (Array::splat(1.0) - elem.formant_breath) + Array::splat(noise) * elem.formant_breath;
 
         // make sure it's loud enough
         let x = inp * elem.formant_amp;
