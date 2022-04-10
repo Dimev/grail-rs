@@ -14,7 +14,9 @@ pub mod transcribe;
 pub use crate::array::*;
 
 
-
+// TODO: move phoneme related stuff into phoneme, and language related stuff into either language or transcribe
+// TODO: consider const generics (when done ofc)?
+// TODO: make most of the order easy to read, so keep the explanation
 
 // we'll want to allow voices to be used from this library
 pub mod voices;
@@ -78,8 +80,6 @@ pub use crate::select::*;
 // so far we got most of the sound generating "backend" done, now time for the "frontend"
 // this needs to take in text and convert it into phonemes + timing.
 // let's first make the rules we use for text -> phoneme
-
-// TODO: move phoneme related stuff into phoneme, and language related stuff into either language or transcribe
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct TranscriptionRule<'a> {
