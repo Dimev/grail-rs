@@ -14,23 +14,14 @@ pub struct SynthesisElem {
     /// formant bandwidths, normalized to sample rate
     pub formant_bw: Array,
 
+	/// formant softness, aka how much of it is lowpassed instead of bandpassed, with 1.0 being max softness
+	pub formant_soft: Array,
+
     /// formant amplitudes. If these sum up to one, the output amplitude will also be one
     pub formant_amp: Array,
 
 	/// how breathy each formant is. 0 means fully voiced, 1 means full breath
 	pub formant_breath: Array,
-
-    /// antiresonator frequency, normalized to sample rate
-    pub nasal_freq: f32,
-
-    /// antiresonator bandwidth
-    pub nasal_bw: f32,
-
-    /// antiresonator amplitude
-    pub nasal_amp: f32,
-
-    /// voice softness, 0 is saw, 1 is sine
-    pub softness: f32,
 }
 
 // next, make some functions for the element
@@ -42,23 +33,17 @@ impl SynthesisElem {
         frequency: f32,
         formant_freq: [f32; NUM_FORMANTS],
         formant_bw: [f32; NUM_FORMANTS],
+		formant_soft: [f32; NUM_FORMANTS],
         formant_amp: [f32; NUM_FORMANTS],
 		formant_breath: [f32; NUM_FORMANTS],
-        nasal_freq: f32,
-        nasal_bw: f32,
-        nasal_amp: f32,
-        softness: f32,
     ) -> Self {
         Self {
             frequency: frequency / sample_rate as f32,
             formant_freq: Array::new(formant_freq) / Array::splat(sample_rate as f32),
             formant_bw: Array::new(formant_bw) / Array::splat(sample_rate as f32),
+			formant_soft: Array::new(formant_soft),
             formant_amp: Array::new(formant_amp),
 			formant_breath: Array::new(formant_breath),
-            nasal_freq: nasal_freq / sample_rate as f32,
-            nasal_bw: nasal_bw / sample_rate as f32,
-            nasal_amp,
-            softness,
         }
     }
 
@@ -68,12 +53,9 @@ impl SynthesisElem {
             frequency: 0.25,
             formant_freq: Array::splat(0.25),
             formant_bw: Array::splat(0.25),
+			formant_soft: Array::splat(0.0),
             formant_amp: Array::splat(0.0),
 			formant_breath: Array::splat(0.0),
-            nasal_freq: 0.25,
-            nasal_bw: 0.25,
-            nasal_amp: 0.0,
-            softness: 0.0,
         }
     }
 
@@ -81,24 +63,18 @@ impl SynthesisElem {
     pub fn new_phoneme(
         formant_freq: [f32; NUM_FORMANTS],
         formant_bw: [f32; NUM_FORMANTS],
-        formant_amp: [f32; NUM_FORMANTS],
+		formant_soft: [f32; NUM_FORMANTS],
+		formant_amp: [f32; NUM_FORMANTS],
 		formant_breath: [f32; NUM_FORMANTS],
-        nasal_freq: f32,
-        nasal_bw: f32,
-        nasal_amp: f32,
-        softness: f32,
     ) -> Self {
         Self {
             frequency: 0.0,
             formant_freq: Array::new(formant_freq) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
             formant_bw: Array::new(formant_bw) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
+			formant_soft: Array::new(formant_soft),
             // divide it by the sum of the entire amplitudes, that way we get unit gain
             formant_amp: Array::new(formant_amp) / Array::splat(Array::new(formant_amp).sum()),
 			formant_breath: Array::new(formant_breath),
-            nasal_freq: nasal_freq / DEFAULT_SAMPLE_RATE as f32,
-            nasal_bw: nasal_bw / DEFAULT_SAMPLE_RATE as f32,
-            nasal_amp,
-            softness,
         }
     }
     /// blend between this synthesis element and another one
@@ -108,12 +84,9 @@ impl SynthesisElem {
             frequency: self.frequency * (1.0 - alpha) + other.frequency * alpha,
             formant_freq: self.formant_freq.blend(other.formant_freq, alpha),
             formant_bw: self.formant_bw.blend(other.formant_bw, alpha),
+			formant_soft: self.formant_soft.blend(other.formant_soft, alpha),
             formant_amp: self.formant_amp.blend(other.formant_amp, alpha),
 			formant_breath: self.formant_breath.blend(other.formant_breath, alpha),
-            nasal_freq: self.nasal_freq * (1.0 - alpha) + other.nasal_freq * alpha,
-            nasal_bw: self.nasal_bw * (1.0 - alpha) + other.nasal_bw * alpha,
-            nasal_amp: self.nasal_amp * (1.0 - alpha) + other.nasal_amp * alpha,
-            softness: self.softness * (1.0 - alpha) + other.softness * alpha,
         }
     }
 
@@ -139,8 +112,6 @@ impl SynthesisElem {
             frequency: self.frequency * scale,
             formant_freq: self.formant_freq * Array::splat(scale),
             formant_bw: self.formant_bw * Array::splat(scale),
-            nasal_freq: self.nasal_freq * scale,
-            nasal_bw: self.nasal_bw * scale,
             formant_amp,
             ..self // this means fill in the rest of the struct with self
         }
@@ -178,12 +149,6 @@ pub struct Synthesize<T: Iterator<Item = SynthesisElem>> {
     /// filter state b
     formant_state_b: Array,
 
-    /// antiresonator state a
-    nasal_state_a: f32,
-
-    /// antiresonator state b
-    nasal_state_b: f32,
-
     /// phase for the current pulse
     phase: f32,
 
@@ -202,7 +167,16 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         // get the item from the underlying iterator, or return None if we can't
         let elem = self.iter.next()?;
 
-        // first, we want to generate the impulse to put through the filter
+		None
+
+		// TODO: modified FM synthesis
+		// aka: exp(-cosine - 1) carrier wave
+		// multiplied by some more sine waves to do the formants themselves
+		// on noisyness, blend the carrier with lowpassed noise with the same bw as the cosine itself
+
+
+        /*
+		// first, we want to generate the impulse to put through the filter
         // this is a blend between a saw wave, and a triangle wave, then passed through a smoothstep
         let rising_phase = self.phase / (1.0 - 0.5 * elem.softness);
         let falling_phase = (1.0 - self.phase) / (0.5 * elem.softness);
@@ -271,6 +245,7 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
 
         // and the notch result, which is also the final result
         Some(r - k * v1 * elem.nasal_amp)
+		*/
     }
 }
 
@@ -285,8 +260,6 @@ where
             iter: self.into_iter(),
             formant_state_a: Array::splat(0.0),
             formant_state_b: Array::splat(0.0),
-            nasal_state_a: 0.0,
-            nasal_state_b: 0.0,
             phase: 0.5,
             seed: 0,
         }

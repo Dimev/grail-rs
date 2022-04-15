@@ -1,4 +1,5 @@
 /// the number of formants to synthesize
+/// TODO: consider using 8 instead?
 pub const NUM_FORMANTS: usize = 12;
 
 // we'll want to implement these for arrays
