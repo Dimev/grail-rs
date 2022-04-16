@@ -2,17 +2,16 @@
 #![forbid(unsafe_code)]
 
 pub mod array;
-pub mod random;
-pub mod synthesise;
-pub mod jitter;
-pub mod voice;
-pub mod sequence;
-pub mod select;
 pub mod intonate;
+pub mod jitter;
+pub mod random;
+pub mod select;
+pub mod sequence;
+pub mod synthesise;
 pub mod transcribe;
+pub mod voice;
 
 pub use crate::array::*;
-
 
 // TODO: move phoneme related stuff into phoneme, and language related stuff into either language or transcribe
 // TODO: consider const generics (when done ofc)?
@@ -39,8 +38,6 @@ pub const PHONEME_BUFFER_SIZE: usize = 64;
 /// this is effectively the maximum rule length
 pub const TRANSCRIPTION_BUFFER_SIZE: usize = 64;
 
-
-
 // and, a helper function to do random number generation
 pub use crate::random::*;
 
@@ -56,13 +53,9 @@ pub use crate::synthesise::*;
 // the downside is that there are quite a few
 pub use crate::voice::*;
 
-
-
 // We also want to jitter all frequencies a bit for more realism, so let's do that next
 
 pub use crate::jitter::*;
-
-
 
 // we now have a way to synthesize sound, and add random variations to it.
 // However, generating the induvidual samples is kinda a hassle to do, so it would be nicer if we can give each synthesis element a length
@@ -70,11 +63,9 @@ pub use crate::jitter::*;
 // so, we'll create a sequencer that does this
 pub use crate::sequence::*;
 
-
 // next up, we'll want to go from time + phoneme info to a sequence element, so let's do that
 // first, we'll want a new struct to also store timing info with phonemes
 pub use crate::select::*;
-
 
 // now, we need to do some more complex stuff again.
 // so far we got most of the sound generating "backend" done, now time for the "frontend"
@@ -101,14 +92,11 @@ pub struct Language<'a> {
 
 pub use crate::intonate::*;
 
-
-
 // now we want to convert text into phonemes
 // we're going to do this with a find-and-replace ruleset, as defined in language.
 // this is assumed to be sorted, so we can binary search with the prefix,
 // to figure out the range we need to search in and see if it's too low or too high
 pub use crate::transcribe::*;
-
 
 // Here's how it will work
 // synthesizer iterator to generate sound

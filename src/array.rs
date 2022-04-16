@@ -65,12 +65,58 @@ impl Array {
         res
     }
 
+    /// blend two arrays, based on some blend array
+    #[inline]
+    pub fn blend_multiple(self, other: Self, alpha: Array) -> Self {
+        self * (Array::splat(1.0) - alpha) + other * alpha
+    }
+
     /// hyperbolic tangent approximation
     #[inline]
     pub fn tan_approx(self) -> Self {
         let mut res = self;
         for i in 0..NUM_FORMANTS {
             res.x[i] = tan_approx(res.x[i])
+        }
+        res
+    }
+
+    /// cos function
+    #[inline]
+    pub fn cos(self) -> Self {
+        let mut res = self;
+        for i in 0..NUM_FORMANTS {
+            res.x[i] = res.x[i].cos();
+        }
+        res
+    }
+
+    /// exp function
+    #[inline]
+    pub fn exp(self) -> Self {
+        let mut res = self;
+        for i in 0..NUM_FORMANTS {
+            res.x[i] = res.x[i].exp();
+        }
+        res
+    }
+
+    /// fract, take away the integer part of the number
+    #[inline]
+    pub fn fract(self) -> Self {
+        let mut res = self;
+        for i in 0..NUM_FORMANTS {
+            res.x[i] = res.x[i].fract();
+        }
+        res
+    }
+
+    /// floor, leave only the integer part of the number
+    #[inline]
+    pub fn floor(self) -> Self {
+        let mut res = self;
+        for i in 0..NUM_FORMANTS {
+            res.x[i] = res.x[i].floor();
         }
         res
     }

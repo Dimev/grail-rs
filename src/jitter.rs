@@ -1,6 +1,6 @@
-use crate::synthesise::*;
-use crate::random::*;
 use crate::array::*;
+use crate::random::*;
+use crate::synthesise::*;
 use crate::voice::*;
 
 // now we can make our jitter work, as getting random numbers is now easier
@@ -19,22 +19,16 @@ pub struct Jitter<T: Iterator<Item = SynthesisElem>> {
     /// noise for the formant amplitude
     formant_amp_noise: ArrayValueNoise,
 
-    /// nasal frequency
-    nasal_freq_noise: ValueNoise,
-
-    /// nasal amplitude
-    nasal_amp_noise: ValueNoise,
-
     /// noise frequency
     frequency: f32,
 
     /// frequency deviation
     delta_frequency: f32,
 
-    /// formant deviation, also includes antiresonator/nasal
+    /// formant deviation
     delta_formant_freq: f32,
 
-    /// amplitude deviation, also includes antiresonator/nasal
+    /// amplitude deviation
     delta_amplitude: f32,
 }
 
@@ -49,8 +43,6 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Jitter<T> {
         let freq = self.freq_noise.next(self.frequency);
         let formant_freq = self.formant_freq_noise.next(self.frequency);
         let formant_amp = self.formant_amp_noise.next(self.frequency);
-        let nasal_freq = self.nasal_freq_noise.next(self.frequency);
-        let nasal_amp = self.nasal_amp_noise.next(self.frequency);
 
         // change them in the element
         elem.frequency += freq * self.delta_frequency;
@@ -82,8 +74,6 @@ where
             freq_noise: ValueNoise::new(&mut seed),
             formant_freq_noise: ArrayValueNoise::new(&mut seed),
             formant_amp_noise: ArrayValueNoise::new(&mut seed),
-            nasal_freq_noise: ValueNoise::new(&mut seed),
-            nasal_amp_noise: ValueNoise::new(&mut seed),
             frequency: voice.jitter_frequency,
             delta_frequency: voice.jitter_delta_frequency,
             delta_formant_freq: voice.jitter_delta_formant_frequency,

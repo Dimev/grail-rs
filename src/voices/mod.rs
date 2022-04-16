@@ -9,7 +9,7 @@ pub const MKPHON: fn(
     bw: [f32; NUM_FORMANTS],
     soft: [f32; NUM_FORMANTS],
     amp: [f32; NUM_FORMANTS],
-	breath: [f32; NUM_FORMANTS],
+    breath: [f32; NUM_FORMANTS],
 ) -> SynthesisElem = SynthesisElem::new_phoneme;
 
 // include the voices we made

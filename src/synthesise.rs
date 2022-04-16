@@ -14,14 +14,14 @@ pub struct SynthesisElem {
     /// formant bandwidths, normalized to sample rate
     pub formant_bw: Array,
 
-	/// formant softness, aka how much of it is lowpassed instead of bandpassed, with 1.0 being max softness
-	pub formant_soft: Array,
+    /// formant softness, aka how much of it is lowpassed instead of bandpassed, with 1.0 being max softness
+    pub formant_soft: Array,
 
     /// formant amplitudes. If these sum up to one, the output amplitude will also be one
     pub formant_amp: Array,
 
-	/// how breathy each formant is. 0 means fully voiced, 1 means full breath
-	pub formant_breath: Array,
+    /// how breathy each formant is. 0 means fully voiced, 1 means full breath
+    pub formant_breath: Array,
 }
 
 // next, make some functions for the element
@@ -33,17 +33,17 @@ impl SynthesisElem {
         frequency: f32,
         formant_freq: [f32; NUM_FORMANTS],
         formant_bw: [f32; NUM_FORMANTS],
-		formant_soft: [f32; NUM_FORMANTS],
+        formant_soft: [f32; NUM_FORMANTS],
         formant_amp: [f32; NUM_FORMANTS],
-		formant_breath: [f32; NUM_FORMANTS],
+        formant_breath: [f32; NUM_FORMANTS],
     ) -> Self {
         Self {
             frequency: frequency / sample_rate as f32,
             formant_freq: Array::new(formant_freq) / Array::splat(sample_rate as f32),
             formant_bw: Array::new(formant_bw) / Array::splat(sample_rate as f32),
-			formant_soft: Array::new(formant_soft),
+            formant_soft: Array::new(formant_soft),
             formant_amp: Array::new(formant_amp),
-			formant_breath: Array::new(formant_breath),
+            formant_breath: Array::new(formant_breath),
         }
     }
 
@@ -53,9 +53,9 @@ impl SynthesisElem {
             frequency: 0.25,
             formant_freq: Array::splat(0.25),
             formant_bw: Array::splat(0.25),
-			formant_soft: Array::splat(0.0),
+            formant_soft: Array::splat(0.0),
             formant_amp: Array::splat(0.0),
-			formant_breath: Array::splat(0.0),
+            formant_breath: Array::splat(0.0),
         }
     }
 
@@ -63,18 +63,18 @@ impl SynthesisElem {
     pub fn new_phoneme(
         formant_freq: [f32; NUM_FORMANTS],
         formant_bw: [f32; NUM_FORMANTS],
-		formant_soft: [f32; NUM_FORMANTS],
-		formant_amp: [f32; NUM_FORMANTS],
-		formant_breath: [f32; NUM_FORMANTS],
+        formant_soft: [f32; NUM_FORMANTS],
+        formant_amp: [f32; NUM_FORMANTS],
+        formant_breath: [f32; NUM_FORMANTS],
     ) -> Self {
         Self {
             frequency: 0.0,
             formant_freq: Array::new(formant_freq) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
             formant_bw: Array::new(formant_bw) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
-			formant_soft: Array::new(formant_soft),
+            formant_soft: Array::new(formant_soft),
             // divide it by the sum of the entire amplitudes, that way we get unit gain
             formant_amp: Array::new(formant_amp) / Array::splat(Array::new(formant_amp).sum()),
-			formant_breath: Array::new(formant_breath),
+            formant_breath: Array::new(formant_breath),
         }
     }
     /// blend between this synthesis element and another one
@@ -84,9 +84,9 @@ impl SynthesisElem {
             frequency: self.frequency * (1.0 - alpha) + other.frequency * alpha,
             formant_freq: self.formant_freq.blend(other.formant_freq, alpha),
             formant_bw: self.formant_bw.blend(other.formant_bw, alpha),
-			formant_soft: self.formant_soft.blend(other.formant_soft, alpha),
+            formant_soft: self.formant_soft.blend(other.formant_soft, alpha),
             formant_amp: self.formant_amp.blend(other.formant_amp, alpha),
-			formant_breath: self.formant_breath.blend(other.formant_breath, alpha),
+            formant_breath: self.formant_breath.blend(other.formant_breath, alpha),
         }
     }
 
@@ -143,13 +143,7 @@ pub struct Synthesize<T: Iterator<Item = SynthesisElem>> {
     /// underlying iterator
     iter: T,
 
-    /// filter state a
-    formant_state_a: Array,
-
-    /// filter state b
-    formant_state_b: Array,
-
-    /// phase for the current pulse
+    /// phase of the carrier
     phase: f32,
 
     /// noise state
@@ -167,85 +161,63 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         // get the item from the underlying iterator, or return None if we can't
         let elem = self.iter.next()?;
 
-		None
+        // We're using modified FM synthesis here
+		// It's not actual FM synthesis however, it's actually AM synthesis
+		// it works by having a carrier wave (cosine) with some exponential curve applied to it, mutliplied by a modulator, which is another cosine
+		// the modulator is at the formant frequency, carrier at the base frequency 
 
-		// TODO: modified FM synthesis
-		// aka: exp(-cosine - 1) carrier wave
-		// multiplied by some more sine waves to do the formants themselves
-		// on noisyness, blend the carrier with lowpassed noise with the same bw as the cosine itself
+        // bandwidth
+        let k = 2.8;
 
+        // cosine carrier wave, scaled with the exp
+        let voiced_carrier = (Array::splat(k)
+            * (Array::splat(self.phase * core::f32::consts::TAU).cos()
+            - Array::splat(1.0)))
+        .exp();
 
-        /*
-		// first, we want to generate the impulse to put through the filter
-        // this is a blend between a saw wave, and a triangle wave, then passed through a smoothstep
-        let rising_phase = self.phase / (1.0 - 0.5 * elem.softness);
-        let falling_phase = (1.0 - self.phase) / (0.5 * elem.softness);
+        // lowpassed noise, as the unvoiced carrier
+        let unvoiced_carrier = Array::splat(1.0);
 
-        // make the triangle/saw wave
-        let wave = rising_phase.min(falling_phase);
+        // true carrier, blended based on how breathy it is
+        let carrier = voiced_carrier.blend_multiple(unvoiced_carrier, elem.formant_breath);
 
-        // and pass it through the smoothstep
-        let pulse = 6.0 * wave * wave - 4.0 * wave * wave * wave - 1.0;
+        // now get the modulator
+        // this is another cosine wave
+        // however, to allow smooth frequency sliding, this is a blend between two cosines
+        // one with a frequency that is multiple of the carrier, rounded down, and the other rounded up
+        // so first calculate the phase for those
+
+        // get the multiple of the carrier the modulator is at
+        let multiple = elem.formant_freq / Array::splat(elem.frequency);
+
+        // round down
+        let mod_freq_a = multiple.floor();
+
+        // round up
+        let mod_freq_b = multiple.floor() + Array::splat(1.0);
+
+        // blend between them
+        let mod_blend = multiple.fract();
+
+        // get the actual carrier wave
+        let modulator = Array::blend_multiple(
+            (Array::splat(self.phase.fract() * core::f32::consts::TAU) * mod_freq_a).cos(),
+            (Array::splat(self.phase.fract() * core::f32::consts::TAU) * mod_freq_b).cos(),
+            mod_blend,
+        );
+
+        // now generate the full wave
+        let wave = carrier * Array::blend_multiple(modulator, Array::splat(1.0), elem.formant_soft);
 
         // increment the phase
         self.phase += elem.frequency;
 
-        // and wrap it back around if needed
-        if self.phase > 1.0 {
-            self.phase -= 1.0;
-        }
+        // phase rollover
+        self.phase = self.phase.fract();
 
-        // and also generate the noise
-        let noise = random_f32(&mut self.seed);
+        // and return the wave, scaled by amplitude
+        Some((wave * elem.formant_amp).sum())
 
-		// blend the wave and noise to control the breathiness
-		let inp = Array::splat(pulse) * (Array::splat(1.0) - elem.formant_breath) + Array::splat(noise) * elem.formant_breath;
-
-        // make sure it's loud enough
-        let x = inp * elem.formant_amp;
-
-        // now, apply the parallel bandpass filter
-        // this is a State Variable Filter, from here: https://cytomic.com/files/dsp/SvfLinearTrapOptimised2.pdf
-        // first, the parameters
-        let g = elem.formant_freq.tan_approx();
-
-        // stuff needed to make the filter parameters
-        // k = 1 / Q, and bandwidth = frequency / Q, so rewrite it to get k from the bandwidth and freq
-        let k = elem.formant_bw / elem.formant_freq;
-        let a1 = Array::splat(1.0) / (Array::splat(1.0) + g * (g + k));
-        let a2 = g * a1;
-
-        // process the filter
-        let v1 = a1 * self.formant_state_a + a2 * (x - self.formant_state_b);
-        let v2 = self.formant_state_b + g * v1;
-
-        // update the state
-        self.formant_state_a = Array::splat(2.0) * v1 - self.formant_state_a;
-        self.formant_state_b = Array::splat(2.0) * v2 - self.formant_state_b;
-
-        // we're interested in the bandpass result here
-        // which is just v1
-        let r = v1.sum();
-
-        // now, do the same to get the notch filter
-        let g = tan_approx(elem.nasal_freq);
-
-        // parameters
-        let k = elem.nasal_bw / elem.nasal_freq;
-        let a1 = 1.0 / (1.0 + g * (g + k));
-        let a2 = g * a1;
-
-        // process
-        let v1 = a1 * self.nasal_state_a + a2 * (r - self.nasal_state_b);
-        let v2 = self.nasal_state_b + g * v1;
-
-        // update
-        self.nasal_state_a = 2.0 * v1 - self.nasal_state_a;
-        self.nasal_state_b = 2.0 * v2 - self.nasal_state_b;
-
-        // and the notch result, which is also the final result
-        Some(r - k * v1 * elem.nasal_amp)
-		*/
     }
 }
 
@@ -258,9 +230,7 @@ where
     fn synthesize(self) -> Synthesize<Self::IntoIter> {
         Synthesize {
             iter: self.into_iter(),
-            formant_state_a: Array::splat(0.0),
-            formant_state_b: Array::splat(0.0),
-            phase: 0.5,
+            phase: 0.0,
             seed: 0,
         }
     }

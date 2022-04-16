@@ -1,5 +1,5 @@
-use crate::voice::*;
 use crate::sequence::*;
+use crate::voice::*;
 
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct PhonemeElem {
