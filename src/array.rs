@@ -36,6 +36,16 @@ impl Array {
         Self { x: arr }
     }
 
+	/// make a new array from a given function
+	#[inline]
+	pub fn from_func<F: FnMut() -> f32>(f: &mut F) -> Self {
+		let mut arr = [0.0; NUM_FORMANTS];
+		for x in arr.iter_mut() {
+			*x = f();
+		}
+		Self { x: arr }
+	}
+
     /// makes a new array and fills it with a single element
     #[inline]
     pub fn splat(val: f32) -> Self {
@@ -43,6 +53,16 @@ impl Array {
             x: [val; NUM_FORMANTS],
         }
     }
+
+	// TODO: use this for everything
+	/// do something for every value in the array
+	#[inline]
+	pub fn map<F: Fn(f32) -> f32>(mut self, f: F) -> Self {		
+        for i in 0..NUM_FORMANTS {
+            self.x[i] = f(self.x[i]);
+        }
+        self
+	}
 
     /// sums all elements in an array together
     #[inline]

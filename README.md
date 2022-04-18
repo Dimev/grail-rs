@@ -7,12 +7,17 @@ The goal of this synthesizer is to be as simple as possible, and easy to port to
 Still heavy WIP
 
 # Roadmap:
- - Get the output to be roughly normalized by default
+ - Get the output to be roughly normalized by default (Almost done, ModFM does wonders here)
+ - Move everything back to the 2000 line file, that was nicer to work with IMO
+ - Use a different carrier for ModFM, so it's closer to what an actual speech sound wave looks like
+ - Finish the example, get rid of rodio and dev dependancies
+ - Make a full voice
  - Complete the intonator, can see a few items into the future and adjusts voice based on that (also a ruleset for this?)
  - Complete the text->phoneme transcription, via a find-and-replace ruleset
  - Make a macro to generate a language from a language file (and do sorting automatically)
  - make a better way to make voices
  - (later) add a way to send commands to change the intonation
+ - (later, maybe) Automatic voice replication
 
 # License
 Licensed under either of

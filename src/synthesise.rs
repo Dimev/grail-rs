@@ -146,6 +146,9 @@ pub struct Synthesize<T: Iterator<Item = SynthesisElem>> {
     /// phase of the carrier
     phase: f32,
 
+	/// noise state of each formant
+	noise: Array,
+
     /// noise state
     seed: u32,
 }
@@ -161,6 +164,12 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         // get the item from the underlying iterator, or return None if we can't
         let elem = self.iter.next()?;
 
+		// update the noise state
+		let next_noise = Array::from_func(&mut || random_f32(&mut self.seed));
+
+		// apply the lowpass filter
+		self.noise = next_noise * Array::splat(0.01) + self.noise * Array::splat(0.99);
+
         // We're using modified FM synthesis here
 		// It's not actual FM synthesis however, it's actually AM synthesis
 		// it works by having a carrier wave (cosine) with some exponential curve applied to it, mutliplied by a modulator, which is another cosine
@@ -170,13 +179,16 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         let k = 2.8;
 
         // cosine carrier wave, scaled with the exp
+		// TODO: replace with something more similar to the FOF envelope
+		// also change the explanation to be less ModFM and more how this works
+		// ALSO: decay rate changes the bw at -3db, so this can be used to control the rise and decay bw
         let voiced_carrier = (Array::splat(k)
             * (Array::splat(self.phase * core::f32::consts::TAU).cos()
             - Array::splat(1.0)))
         .exp();
 
         // lowpassed noise, as the unvoiced carrier
-        let unvoiced_carrier = Array::splat(1.0);
+        let unvoiced_carrier = self.noise;
 
         // true carrier, blended based on how breathy it is
         let carrier = voiced_carrier.blend_multiple(unvoiced_carrier, elem.formant_breath);
@@ -231,6 +243,7 @@ where
         Synthesize {
             iter: self.into_iter(),
             phase: 0.0,
+			noise: Array::splat(0.0),
             seed: 0,
         }
     }
