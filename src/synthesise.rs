@@ -176,10 +176,15 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
 		// the modulator is at the formant frequency, carrier at the base frequency 
 
         // bandwidth
-        let k = 2.8;
+        let k = 3.8;
 
         // cosine carrier wave, scaled with the exp
 		// TODO: replace with something more similar to the FOF envelope
+		// can be done with a smoothstep and
+		// it's effectively the decay of exp(-ax) and exp(b(x-1)), so x = b/a+b when they are equal, and y = exp(-a*b/a+b)
+		// we can use this to determine when to blend between the 2
+		// then just use regular bandwidth calculations to figure out a and b from bw and smoothness
+
 		// also change the explanation to be less ModFM and more how this works
 		// ALSO: decay rate changes the bw at -3db, so this can be used to control the rise and decay bw
         let voiced_carrier = (Array::splat(k)
