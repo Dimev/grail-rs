@@ -1,6 +1,6 @@
 //! generic voice
 use crate::voices::MKPHON;
-use crate::{Voice, VoiceStorage, DEFAULT_SAMPLE_RATE};
+use crate::*;
 
 pub fn generic() -> Voice {
     Voice {
