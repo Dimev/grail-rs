@@ -507,7 +507,7 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
 		// the modulator is at the formant frequency, carrier at the base frequency 
 
         // bandwidth
-        let k = 3.8;
+        let k = Array::splat(0.1);
 
         // cosine carrier wave, scaled with the exp
 		// TODO: replace with something more similar to the FOF envelope
@@ -529,11 +529,11 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
 		// the carier is a sort of exp(cos(x) - 1), but instead simulated using a triangle/saw wave and a smoothstep
 		// it's peak (from the bottom) is at the height the two exp(-x)'s calculated from the bandwidth
 		// TODO: find better wave to emulate decay here
-		let carrier_rise = Array::splat(1.0 - self.phase) / (Array::splat(1.0) - Array::splat(0.1));
-		let carrier_decay = Array::splat(self.phase) / Array::splat(0.1);
+		let carrier_rise = Array::splat(1.0 - self.phase) / k;
+		let carrier_decay = Array::splat(self.phase) / (Array::splat(1.0) - k);
 
 		// carrier base, aka the triangle wave
-		let carrier_base = Array::splat(1.0) - carrier_rise.min(carrier_decay);
+		let carrier_base = Array::splat(1.0) - carrier_rise.min(carrier_decay) * Array::splat(0.9);
 
 		// and apply the smoothstep, as well as keep it to the top according to the decay rate
 		let voiced_carrier = carrier_base * carrier_base * (Array::splat(3.0) - Array::splat(2.0) * carrier_base) * Array::splat(0.8) + Array::splat(0.2);
