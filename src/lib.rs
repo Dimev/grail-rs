@@ -31,7 +31,7 @@ pub const TRANSCRIPTION_BUFFER_SIZE: usize = 64;
 pub const NUM_FORMANTS: usize = 12;
 
 // we'll want to implement these for arrays
-use core::ops::{Add, Div, Mul, Sub};
+use core::ops::{Add, Div, Mul, Sub, Neg};
 
 // We'll need some helper functions
 // random number generation
@@ -90,15 +90,15 @@ impl Array {
         Self { x: arr }
     }
 
-	/// make a new array from a given function
-	#[inline]
-	pub fn from_func<F: FnMut() -> f32>(f: &mut F) -> Self {
-		let mut arr = [0.0; NUM_FORMANTS];
-		for x in arr.iter_mut() {
-			*x = f();
-		}
-		Self { x: arr }
-	}
+    /// make a new array from a given function
+    #[inline]
+    pub fn from_func<F: FnMut() -> f32>(f: &mut F) -> Self {
+        let mut arr = [0.0; NUM_FORMANTS];
+        for x in arr.iter_mut() {
+            *x = f();
+        }
+        Self { x: arr }
+    }
 
     /// makes a new array and fills it with a single element
     #[inline]
@@ -108,18 +108,18 @@ impl Array {
         }
     }
 
-	// TODO: use this for everything
-	/// do something for every value in the array
-	#[inline]
-	pub fn map<F: Fn(f32) -> f32>(mut self, f: F) -> Self {		
+    // TODO: use this for everything
+    /// do something for every value in the array
+    #[inline]
+    pub fn map<F: Fn(f32) -> f32>(mut self, f: F) -> Self {
         for i in 0..NUM_FORMANTS {
             self.x[i] = f(self.x[i]);
         }
         self
-	}
+    }
 
-	/// take the min of 2 arrays, element wise
-	#[inline]
+    /// take the min of 2 arrays, element wise
+    #[inline]
     pub fn min(self, other: Self) -> Self {
         let mut res = self;
         for i in 0..NUM_FORMANTS {
@@ -190,7 +190,7 @@ impl Array {
 // using the Op  traits to make life easier here, this way we can just do +, - * and /
 impl Add for Array {
     type Output = Self;
-    /// adds two arrays together
+    /// adds the values in two arrays together
     #[inline]
     fn add(self, other: Self) -> Self {
         let mut res = self;
@@ -203,7 +203,7 @@ impl Add for Array {
 
 impl Sub for Array {
     type Output = Self;
-    /// subtracts an array from another
+    /// subtracts the values in an array from another
     #[inline]
     fn sub(self, other: Self) -> Self {
         let mut res = self;
@@ -216,7 +216,7 @@ impl Sub for Array {
 
 impl Mul for Array {
     type Output = Self;
-    /// multiplies two arrays together
+    /// multiplies the values in two arrays together
     #[inline]
     fn mul(self, other: Self) -> Self {
         let mut res = self;
@@ -229,7 +229,7 @@ impl Mul for Array {
 
 impl Div for Array {
     type Output = Self;
-    /// divides one array with another
+    /// divides the values of one array with another
     #[inline]
     fn div(self, other: Self) -> Self {
         let mut res = self;
@@ -238,6 +238,19 @@ impl Div for Array {
         }
         res
     }
+}
+
+impl Neg for Array {
+    type Output = Self;
+    /// negates all values in the array
+    #[inline]
+    fn neg(mut self) -> Self {
+        
+        for i in 0..NUM_FORMANTS {
+            self.x[i] = -self.x[i];
+        }
+        self
+    }    
 }
 
 // As well as a few utils to do better random generation, we want to make a few structs to help with generating noise
@@ -268,7 +281,7 @@ impl ValueNoise {
 
         // wrap it around if needed
         if self.phase > 1.0 {
-            self.phase -= 1.0;
+            self.phase = self.phase.fract();
 
             // also update the noise
             self.current = self.next;
@@ -314,7 +327,7 @@ impl ArrayValueNoise {
 
         // wrap it around if needed
         if self.phase > 1.0 {
-            self.phase -= 1.0;
+            self.phase = self.phase.fract();
 
             // also update the noise
             self.current = self.next;
@@ -342,10 +355,10 @@ pub struct SynthesisElem {
     pub formant_freq: Array,
 
     /// formant bandwidths at the peak, normalized to sample rate
-    pub formant_bw: Array,
+    pub formant_decay_bw: Array,
 
     /// formant bandwidths at the base, controls how harsh it sounds. normalized to the sample rate
-    pub formant_soft: Array,
+    pub formant_attack_bw: Array,
 
     /// formant amplitudes. If these sum up to one, the output amplitude will also be one
     pub formant_amp: Array,
@@ -362,16 +375,16 @@ impl SynthesisElem {
         sample_rate: u32,
         frequency: f32,
         formant_freq: [f32; NUM_FORMANTS],
-        formant_bw: [f32; NUM_FORMANTS],
-        formant_soft: [f32; NUM_FORMANTS],
+        formant_decay_bw: [f32; NUM_FORMANTS],
+        formant_attack_bw: [f32; NUM_FORMANTS],
         formant_amp: [f32; NUM_FORMANTS],
         formant_breath: [f32; NUM_FORMANTS],
     ) -> Self {
         Self {
             frequency: frequency / sample_rate as f32,
             formant_freq: Array::new(formant_freq) / Array::splat(sample_rate as f32),
-            formant_bw: Array::new(formant_bw) / Array::splat(sample_rate as f32),
-            formant_soft: Array::new(formant_soft),
+            formant_decay_bw: Array::new(formant_decay_bw) / Array::splat(sample_rate as f32),
+            formant_attack_bw: Array::new(formant_attack_bw),
             formant_amp: Array::new(formant_amp),
             formant_breath: Array::new(formant_breath),
         }
@@ -382,27 +395,28 @@ impl SynthesisElem {
         Self {
             frequency: 0.25,
             formant_freq: Array::splat(0.25),
-            formant_bw: Array::splat(0.25),
-            formant_soft: Array::splat(0.0),
+            formant_decay_bw: Array::splat(0.25),
+            formant_attack_bw: Array::splat(0.0),
             formant_amp: Array::splat(0.0),
             formant_breath: Array::splat(0.0),
         }
     }
 
     /// Make a new one with the default sample rate
-	/// Also ensure that the formant amplitudes sum up to 1 to get unit gain
+    /// Also ensure that the formant amplitudes sum up to 1 to get unit gain
     pub fn new_phoneme(
         formant_freq: [f32; NUM_FORMANTS],
-        formant_bw: [f32; NUM_FORMANTS],
-        formant_soft: [f32; NUM_FORMANTS],
+        formant_decay_bw: [f32; NUM_FORMANTS],
+        formant_attack_bw: [f32; NUM_FORMANTS],
         formant_amp: [f32; NUM_FORMANTS],
         formant_breath: [f32; NUM_FORMANTS],
     ) -> Self {
         Self {
             frequency: 0.0,
             formant_freq: Array::new(formant_freq) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
-            formant_bw: Array::new(formant_bw) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
-            formant_soft: Array::new(formant_soft),
+            formant_decay_bw: Array::new(formant_decay_bw)
+                / Array::splat(DEFAULT_SAMPLE_RATE as f32),
+            formant_attack_bw: Array::new(formant_attack_bw) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
             // divide it by the sum of the entire amplitudes, that way we get unit gain
             formant_amp: Array::new(formant_amp) / Array::splat(Array::new(formant_amp).sum()),
             formant_breath: Array::new(formant_breath),
@@ -414,8 +428,8 @@ impl SynthesisElem {
         Self {
             frequency: self.frequency * (1.0 - alpha) + other.frequency * alpha,
             formant_freq: self.formant_freq.blend(other.formant_freq, alpha),
-            formant_bw: self.formant_bw.blend(other.formant_bw, alpha),
-            formant_soft: self.formant_soft.blend(other.formant_soft, alpha),
+            formant_decay_bw: self.formant_decay_bw.blend(other.formant_decay_bw, alpha),
+            formant_attack_bw: self.formant_attack_bw.blend(other.formant_attack_bw, alpha),
             formant_amp: self.formant_amp.blend(other.formant_amp, alpha),
             formant_breath: self.formant_breath.blend(other.formant_breath, alpha),
         }
@@ -442,7 +456,8 @@ impl SynthesisElem {
         Self {
             frequency: self.frequency * scale,
             formant_freq: self.formant_freq * Array::splat(scale),
-            formant_bw: self.formant_bw * Array::splat(scale),
+            formant_decay_bw: self.formant_decay_bw * Array::splat(scale),
+            formant_attack_bw: self.formant_attack_bw * Array::splat(scale),
             formant_amp,
             ..self // this means fill in the rest of the struct with self
         }
@@ -477,8 +492,8 @@ pub struct Synthesize<T: Iterator<Item = SynthesisElem>> {
     /// phase of the carrier
     phase: f32,
 
-	/// noise state of each formant
-	noise: Array,
+    /// noise state of each formant
+    noise: Array,
 
     /// noise state
     seed: u32,
@@ -495,50 +510,52 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         // get the item from the underlying iterator, or return None if we can't
         let elem = self.iter.next()?;
 
-		// update the noise state
-		let next_noise = Array::from_func(&mut || random_f32(&mut self.seed));
+        // update the noise state
+        let next_noise = Array::from_func(&mut || random_f32(&mut self.seed));
 
-		// apply the lowpass filter
-		self.noise = next_noise * Array::splat(0.01) + self.noise * Array::splat(0.99);
+        // apply the lowpass filter
+        self.noise = next_noise * Array::splat(0.01) + self.noise * Array::splat(0.99);
 
         // We're using modified FM synthesis here
-		// It's not actual FM synthesis however, it's actually AM synthesis
-		// it works by having a carrier wave (cosine) with some exponential curve applied to it, mutliplied by a modulator, which is another cosine
-		// the modulator is at the formant frequency, carrier at the base frequency 
+        // It's not actual FM synthesis however, it's actually AM synthesis
+        // it works by having a carrier wave (cosine) with some exponential curve applied to it,
+        // mutliplied by a modulator, which is another cosine
+        // the modulator is at the formant frequency, carrier at the base frequency
 
-        // bandwidth
-        let k = Array::splat(0.1);
+        // We use a different form of it, replacing the exp(cos) carrier with two smoothsteps instead,
+        // in order to better simulate the rise and decay of an actual vocal tract
 
-        // cosine carrier wave, scaled with the exp
-		// TODO: replace with something more similar to the FOF envelope
-		// can be done with a smoothstep and
-		// it's effectively the decay of exp(-ax) and exp(b(x-1)), so x = b/a+b when they are equal, and y = exp(-a*b/a+b)
-		// we can use this to determine when to blend between the 2
-		// then just use regular bandwidth calculations to figure out a and b from bw and smoothness
-
-		// also change the explanation to be less ModFM and more how this works
-		// ALSO: decay rate changes the bw at -3db, so this can be used to control the rise and decay bw
-        /*let voiced_carrier = (Array::splat(k)
-            * (Array::splat(self.phase * core::f32::consts::TAU).cos()
-            - Array::splat(1.0)))
-        .exp();*/
-
+        // where to place the lowest point of the decay/rise pair
+        // this is solved by x*decay =  (next cycle - x) * attack
+        // rewritten this is c * attack / decay + attack
+        let carrier_center = (Array::splat(elem.frequency) * elem.formant_attack_bw) 
+            / (elem.formant_attack_bw + elem.formant_decay_bw);
+        
+        // where the lowest point really is
+        // this is just passing the lowest point into exp()
+        let carrier_lowest_amplitude = (-carrier_center * elem.formant_decay_bw).exp(); 
+        
         // lowpassed noise, as the unvoiced carrier
         let unvoiced_carrier = self.noise;
 
-		// the carier is a sort of exp(cos(x) - 1), but instead simulated using a triangle/saw wave and a smoothstep
-		// it's peak (from the bottom) is at the height the two exp(-x)'s calculated from the bandwidth
-		// TODO: find better wave to emulate decay here
-		let carrier_rise = Array::splat(1.0 - self.phase) / k;
-		let carrier_decay = Array::splat(self.phase) / (Array::splat(1.0) - k);
+        // first, a triangle wave.
+        // this is later passed into a smoothstep to get the proper carrier shape
+        let carrier_rise = Array::splat(1.0 - self.phase) / carrier_center;
+        let carrier_decay = Array::splat(self.phase) / (Array::splat(1.0) - carrier_center);
 
-		// carrier base, aka the triangle wave
-		let carrier_base = Array::splat(1.0) - carrier_rise.min(carrier_decay) * Array::splat(0.9);
+        // carrier base, aka the triangle wave
+        let carrier_base = Array::splat(1.0) - carrier_rise.min(carrier_decay);
 
-		// and apply the smoothstep, as well as keep it to the top according to the decay rate
-		let voiced_carrier = carrier_base * carrier_base * (Array::splat(3.0) - Array::splat(2.0) * carrier_base) * Array::splat(0.8) + Array::splat(0.2);
+        // and apply the smoothstep, as well as keep it to the top according to the decay rate
+        let voiced_carrier = carrier_base
+            * carrier_base
+            * (Array::splat(3.0) - Array::splat(2.0) * carrier_base)
+            
+            // make it so that the lowest point is also the lowest amplitude proper
+            * carrier_lowest_amplitude
+            + (Array::splat(1.0) - carrier_lowest_amplitude);
 
-		// true carrier, blended based on how breathy it is
+        // true carrier, blended based on how breathy it is
         let carrier = voiced_carrier.blend_multiple(unvoiced_carrier, elem.formant_breath);
 
         // now get the modulator
@@ -567,7 +584,8 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         );
 
         // now generate the full wave
-        let wave = carrier * Array::blend_multiple(modulator, Array::splat(1.0), elem.formant_soft);
+        let wave =
+            carrier * Array::blend_multiple(modulator, Array::splat(1.0), elem.formant_attack_bw);
 
         // increment the phase
         self.phase += elem.frequency;
@@ -577,7 +595,6 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
 
         // and return the wave, scaled by amplitude
         Some((wave * elem.formant_amp).sum())
-
     }
 }
 
@@ -591,7 +608,7 @@ where
         Synthesize {
             iter: self.into_iter(),
             phase: 0.0,
-			noise: Array::splat(0.0),
+            noise: Array::splat(0.0),
             seed: 0,
         }
     }
@@ -670,7 +687,6 @@ pub struct Voice {
     /// how much to jitter the formant amplitudes
     pub jitter_delta_amplitude: f32,
 }
-
 
 // We also want to jitter all frequencies a bit for more realism, so let's do that next
 
@@ -756,7 +772,6 @@ where
 // implement it for anything that can become the right iterator
 impl<T> IntoJitter for T where T: IntoIterator<Item = SynthesisElem> + Sized {}
 
-
 // we now have a way to synthesize sound, and add random variations to it.
 // However, generating the induvidual samples is kinda a hassle to do, so it would be nicer if we can give each synthesis element a length
 // and then generate the right sequence from that
@@ -823,7 +838,7 @@ impl<T: Iterator<Item = SequenceElem>> Iterator for Sequencer<T> {
                     self.next_elem = self.iter.next();
 
                     // set the time
-                    self.time = a.length;
+                    self.time += a.length;
                 }
                 // we have none, fetch new ones
                 (None, None) => {
@@ -832,7 +847,7 @@ impl<T: Iterator<Item = SequenceElem>> Iterator for Sequencer<T> {
 
                     // if we have the current one, set the time
                     if let Some(a) = self.cur_elem {
-                        self.time = a.length;
+                        self.time += a.length;
                     }
                 }
                 // for the rest, we can simply exit early
@@ -905,7 +920,6 @@ where
 // implement it for anything that can become the right iterator
 impl<T> IntoSequencer for T where T: IntoIterator<Item = SequenceElem> + Sized {}
 
-
 // next up, we'll want to go from time + phoneme info to a sequence element, so let's do that
 // first, we'll want a new struct to also store timing info with phonemes
 
@@ -973,7 +987,6 @@ where
 // implement it for anything that can become the right iterator
 impl<T> IntoSelector for T where T: IntoIterator<Item = PhonemeElem> + Sized {}
 
-
 // now, we need to do some more complex stuff again.
 // so far we got most of the sound generating "backend" done, now time for the "frontend"
 // this needs to take in text and convert it into phonemes + timing.
@@ -1040,7 +1053,6 @@ where
 }
 
 impl<T> IntoIntonator for T where T: IntoIterator<Item = Phoneme> + Sized {}
-
 
 // now we want to convert text into phonemes
 // we're going to do this with a find-and-replace ruleset, as defined in language.
@@ -1167,7 +1179,6 @@ where
 }
 
 impl<T> IntoTranscriber for T where T: IntoIterator<Item = char> + Sized {}
-
 
 // Here's how it will work
 // synthesizer iterator to generate sound
