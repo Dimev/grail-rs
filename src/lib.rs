@@ -384,7 +384,7 @@ impl SynthesisElem {
             frequency: frequency / sample_rate as f32,
             formant_freq: Array::new(formant_freq) / Array::splat(sample_rate as f32),
             formant_decay_bw: Array::new(formant_decay_bw) / Array::splat(sample_rate as f32),
-            formant_attack_bw: Array::new(formant_attack_bw),
+            formant_attack_bw: Array::new(formant_attack_bw) / Array::splat(sample_rate as f32),
             formant_amp: Array::new(formant_amp),
             formant_breath: Array::new(formant_breath),
         }
@@ -396,7 +396,7 @@ impl SynthesisElem {
             frequency: 0.25,
             formant_freq: Array::splat(0.25),
             formant_decay_bw: Array::splat(0.25),
-            formant_attack_bw: Array::splat(0.0),
+            formant_attack_bw: Array::splat(0.25),
             formant_amp: Array::splat(0.0),
             formant_breath: Array::splat(0.0),
         }
@@ -414,8 +414,7 @@ impl SynthesisElem {
         Self {
             frequency: 0.0,
             formant_freq: Array::new(formant_freq) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
-            formant_decay_bw: Array::new(formant_decay_bw)
-                / Array::splat(DEFAULT_SAMPLE_RATE as f32),
+            formant_decay_bw: Array::new(formant_decay_bw) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
             formant_attack_bw: Array::new(formant_attack_bw) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
             // divide it by the sum of the entire amplitudes, that way we get unit gain
             formant_amp: Array::new(formant_amp) / Array::splat(Array::new(formant_amp).sum()),
@@ -526,14 +525,16 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         // in order to better simulate the rise and decay of an actual vocal tract
 
         // where to place the lowest point of the decay/rise pair
-        // this is solved by x*decay =  (next cycle - x) * attack
-        // rewritten this is c * attack / decay + attack
-        let carrier_center = (Array::splat(elem.frequency) * elem.formant_attack_bw) 
+        // this is solved by x * decay =  (next cycle - x) * attack
+        // rewritten this is next cycle * attack / decay + attack
+        // TODO: this math is definitely wrong
+        // we're already scaled by the phase, as 1.0 is the next item
+        let carrier_center = (Array::splat(1.0) * elem.formant_decay_bw) 
             / (elem.formant_attack_bw + elem.formant_decay_bw);
         
         // where the lowest point really is
         // this is just passing the lowest point into exp()
-        let carrier_lowest_amplitude = (-carrier_center * elem.formant_decay_bw).exp(); 
+        let carrier_lowest_amplitude = (-Array::splat(core::f32::consts::TAU) * carrier_center * elem.formant_decay_bw).exp(); 
         
         // lowpassed noise, as the unvoiced carrier
         let unvoiced_carrier = self.noise;
