@@ -12,11 +12,11 @@ pub fn generic() -> Voice {
                     4000.0,
                 ],
                 [
-                    80.0, 120.0, 180.0, 200.0, 100.0, 100.0, 100.0, 100.0, 300.0, 120.0, 100.0,
+                    1200.0, 140.0, 180.0, 200.0, 100.0, 100.0, 100.0, 100.0, 300.0, 120.0, 100.0,
                     100.0,
                 ],
                 [
-                    2000.0, 30000.0, 40000.0, 6000.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,
+                    2000.0, 3000.0, 4000.0, 6000.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,
                 ],
                 [0.3, 0.3, 0.2, 0.1, 0.0, 0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0],
                 [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -35,10 +35,10 @@ pub fn generic() -> Voice {
                 [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.1, 0.1, 1.0, 0.1, 0.1, 0.1],
             ),
         },
-        center_frequency: 100.0 / DEFAULT_SAMPLE_RATE as f32,
+        center_frequency: 120.0 / DEFAULT_SAMPLE_RATE as f32,
         jitter_frequency: 16.0 / DEFAULT_SAMPLE_RATE as f32,
         jitter_delta_frequency: 4.0 / DEFAULT_SAMPLE_RATE as f32,
         jitter_delta_formant_frequency: 4.0 / DEFAULT_SAMPLE_RATE as f32,
-        jitter_delta_amplitude: 0.1,
+        jitter_delta_amplitude: 0.2,
     }
 }

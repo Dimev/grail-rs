@@ -31,7 +31,7 @@ pub const TRANSCRIPTION_BUFFER_SIZE: usize = 64;
 pub const NUM_FORMANTS: usize = 12;
 
 // we'll want to implement these for arrays
-use core::ops::{Add, Div, Mul, Sub, Neg};
+use core::ops::{Add, Div, Mul, Neg, Sub};
 
 // We'll need some helper functions
 // random number generation
@@ -245,15 +245,17 @@ impl Neg for Array {
     /// negates all values in the array
     #[inline]
     fn neg(mut self) -> Self {
-        
         for i in 0..NUM_FORMANTS {
             self.x[i] = -self.x[i];
         }
         self
-    }    
+    }
 }
 
 // As well as a few utils to do better random generation, we want to make a few structs to help with generating noise
+/// Value noise
+/// This noise works by generating two values, and interpolates between them to generate the noise
+/// once it has gone too far, it generates a new next point to interpolate to
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct ValueNoise {
     current: f32,
@@ -263,6 +265,7 @@ pub struct ValueNoise {
 }
 
 impl ValueNoise {
+    /// make a new value noise generator, from the given seed
     pub fn new(state: &mut u32) -> Self {
         let current = random_f32(state);
         let next = random_f32(state);
@@ -275,6 +278,7 @@ impl ValueNoise {
         }
     }
 
+    /// generate the next value, and update the internal state
     pub fn next(&mut self, increment: f32) -> f32 {
         // increment the state
         self.phase += increment;
@@ -294,6 +298,7 @@ impl ValueNoise {
 }
 
 // and for arrays too
+/// Value noise, for arrays
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct ArrayValueNoise {
     current: Array,
@@ -303,6 +308,7 @@ pub struct ArrayValueNoise {
 }
 
 impl ArrayValueNoise {
+    /// generate a new value noise generator, from the given seed
     pub fn new(state: &mut u32) -> Self {
         let mut current = [0.0; NUM_FORMANTS];
         let mut next = [0.0; NUM_FORMANTS];
@@ -321,6 +327,7 @@ impl ArrayValueNoise {
         }
     }
 
+    /// generate the next value, and update the internal state
     pub fn next(&mut self, increment: f32) -> Array {
         // increment the state
         self.phase += increment;
@@ -345,7 +352,9 @@ impl ArrayValueNoise {
 // next up, let's go to the audio part
 // we'll want a way to represent what to synthesize
 
-/// synthesis element, describes what to synthesize
+/// Synthesis element, describes what to synthesize
+/// This describes the frequency and formants to synthesize
+/// All frequency values are normalized to 0-1, where 0 is 0 hz, and 1 is the sample frequency
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct SynthesisElem {
     /// base frequency, normalized to sample rate
@@ -414,8 +423,11 @@ impl SynthesisElem {
         Self {
             frequency: 0.0,
             formant_freq: Array::new(formant_freq) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
-            formant_decay_bw: Array::new(formant_decay_bw) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
-            formant_attack_bw: Array::new(formant_attack_bw) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
+            formant_decay_bw: Array::new(formant_decay_bw)
+                / Array::splat(DEFAULT_SAMPLE_RATE as f32),
+            formant_attack_bw: Array::new(formant_attack_bw)
+                / Array::splat(DEFAULT_SAMPLE_RATE as f32),
+
             // divide it by the sum of the entire amplitudes, that way we get unit gain
             formant_amp: Array::new(formant_amp) / Array::splat(Array::new(formant_amp).sum()),
             formant_breath: Array::new(formant_breath),
@@ -483,6 +495,9 @@ impl SynthesisElem {
 // for that, we'll use an iterator
 // it keeps track of the filter states, and the underlying iterator to get synthesis elements from
 // if iterators aren't available in the language you are porting to, use a function to get the next item from some state instead
+
+/// Synthesizer for synthesizing actual audio samples from synthesis elements
+/// this is created by calling .synthesize() on an iterator that produces synthesis elements
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct Synthesize<T: Iterator<Item = SynthesisElem>> {
     /// underlying iterator
@@ -527,15 +542,20 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         // where to place the lowest point of the decay/rise pair
         // this is solved by x * decay =  (next cycle - x) * attack
         // rewritten this is next cycle * attack / decay + attack
-        // TODO: this math is definitely wrong
         // we're already scaled by the phase, as 1.0 is the next item
-        let carrier_center = (Array::splat(1.0) * elem.formant_decay_bw) 
-            / (elem.formant_attack_bw + elem.formant_decay_bw);
-        
+        // this means next cycle = 1.0, which simplifies some of the calculation
+        let carrier_center =
+            (elem.formant_decay_bw) / (elem.formant_attack_bw + elem.formant_decay_bw);
+
         // where the lowest point really is
         // this is just passing the lowest point into exp()
-        let carrier_lowest_amplitude = (-Array::splat(core::f32::consts::TAU) * carrier_center * elem.formant_decay_bw).exp(); 
-        
+        // remember to scale the point by the formant base frequency,
+        // as the carrier center is in phase space, 0 is current pulse, 1 is next pulse
+        let carrier_lowest_amplitude = (-Array::splat(core::f32::consts::TAU * elem.frequency)
+            * carrier_center
+            * elem.formant_decay_bw)
+            .exp();
+
         // lowpassed noise, as the unvoiced carrier
         let unvoiced_carrier = self.noise;
 
@@ -551,8 +571,6 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         let voiced_carrier = carrier_base
             * carrier_base
             * (Array::splat(3.0) - Array::splat(2.0) * carrier_base)
-            
-            // make it so that the lowest point is also the lowest amplitude proper
             * carrier_lowest_amplitude
             + (Array::splat(1.0) - carrier_lowest_amplitude);
 
@@ -638,6 +656,7 @@ pub enum Phoneme {
 // next up, a voice storage
 // this is not a full voice, but instead all phonemes, so it's easier to pass around
 // we won't make a constructor for it due to it not really being needed
+/// Stores a synthesis element for each phoneme
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct VoiceStorage {
     pub a: SynthesisElem,
@@ -736,6 +755,7 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Jitter<T> {
         elem.frequency += freq * self.delta_frequency;
         elem.formant_freq =
             elem.formant_freq + formant_freq * Array::splat(self.delta_formant_freq);
+
         // we don't want it to get *louder*, so make sure it only becomes softer by doing (1 + [-1, 1]) / 2, which results in [0, 1]
         // we'll then multiply it by the appropriate amplitude so we can't end up with negative amplitudes for some sounds
         let formant_amp_delta =
