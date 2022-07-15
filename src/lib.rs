@@ -603,8 +603,7 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         );
 
         // now generate the full wave
-        let wave =
-            carrier * Array::blend_multiple(modulator, Array::splat(1.0), elem.formant_attack_bw);
+        let wave = carrier * modulator;
 
         // increment the phase
         self.phase += elem.frequency;
