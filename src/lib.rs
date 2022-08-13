@@ -4,6 +4,8 @@
 // TODO: move phoneme related stuff into phoneme, and language related stuff into either language or transcribe
 // TODO: consider const generics (when done ofc)?
 // TODO: make most of the order easy to read, so keep the explanation
+// TODO: maybe have a CPAL feature to allow easy playback?
+// TODO: move back to svf filters, as they are easier and probably result in better audio
 
 // we'll want to allow voices to be used from this library
 pub mod voices;
@@ -16,7 +18,7 @@ pub mod languages;
 
 /// default sample rate all voices use
 /// Resampling to a different sample rate is possible
-pub const DEFAULT_SAMPLE_RATE: u32 = 44100;
+pub const DEFAULT_SAMPLE_RATE: f32 = 44100.0;
 
 /// number of phonemes stored during transcription
 /// This also effectively limits how many phonemes can be in a transcription rule
@@ -78,75 +80,56 @@ pub fn tan_approx(x: f32) -> f32 {
 
 /// Array, containing NUM_FORMANTS floats. Used to store per-formant data
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
-pub struct Array {
-    /// inner array
-    pub x: [f32; NUM_FORMANTS],
-}
+pub struct Array([f32; NUM_FORMANTS]);
 
 impl Array {
     /// makes a new Array from a given array
     #[inline]
     pub fn new(arr: [f32; NUM_FORMANTS]) -> Self {
-        Self { x: arr }
+        Self(arr)
     }
 
     /// make a new array from a given function
     #[inline]
-    pub fn from_func<F: FnMut() -> f32>(f: &mut F) -> Self {
-        let mut arr = [0.0; NUM_FORMANTS];
-        for x in arr.iter_mut() {
-            *x = f();
-        }
-        Self { x: arr }
+    pub fn from_func<F: FnMut() -> f32>(mut f: F) -> Self {
+        Self([(); NUM_FORMANTS].map(|_| f()))
     }
 
     /// makes a new array and fills it with a single element
     #[inline]
     pub fn splat(val: f32) -> Self {
-        Self {
-            x: [val; NUM_FORMANTS],
-        }
+        Self([val; NUM_FORMANTS])
     }
 
     // TODO: use this for everything
     /// do something for every value in the array
     #[inline]
-    pub fn map<F: Fn(f32) -> f32>(mut self, f: F) -> Self {
-        for i in 0..NUM_FORMANTS {
-            self.x[i] = f(self.x[i]);
-        }
-        self
+    pub fn map<F: Fn(f32) -> f32>(self, f: F) -> Self {
+        Self(self.0.map(f))
     }
 
-    /// take the min of 2 arrays, element wise
+    /// do something for every value in this array and the other
     #[inline]
-    pub fn min(self, other: Self) -> Self {
-        let mut res = self;
-        for i in 0..NUM_FORMANTS {
-            res.x[i] = res.x[i].min(other.x[i]);
-        }
-        res
+    pub fn map2<F: Fn(f32, f32) -> f32>(self, other: Self, f: F) -> Self {
+        Self(core::array::from_fn(|i| f(self.0[i], other.0[i])))
     }
 
     /// sums all elements in an array together
     #[inline]
     pub fn sum(self) -> f32 {
-        let mut res = 0.0;
-        for i in 0..NUM_FORMANTS {
-            res += self.x[i];
-        }
-        res
+        self.0.iter().sum::<f32>()
+    }
+
+    /// take the min of 2 arrays, element wise
+    #[inline]
+    pub fn min(self, other: Self) -> Self {
+        self.map2(other, f32::min)
     }
 
     /// blend two arrays, based on some blend value
     #[inline]
     pub fn blend(self, other: Self, alpha: f32) -> Self {
-        let mut res = self;
-        for i in 0..NUM_FORMANTS {
-            res.x[i] *= 1.0 - alpha;
-            res.x[i] += other.x[i] * alpha;
-        }
-        res
+        self.map2(other, |a, b| a * (1.0 - alpha) + b * alpha)
     }
 
     /// blend two arrays, based on some blend array
@@ -193,11 +176,7 @@ impl Add for Array {
     /// adds the values in two arrays together
     #[inline]
     fn add(self, other: Self) -> Self {
-        let mut res = self;
-        for i in 0..NUM_FORMANTS {
-            res.x[i] += other.x[i];
-        }
-        res
+        self.map2(other, |a, b| a + b)
     }
 }
 
@@ -206,11 +185,7 @@ impl Sub for Array {
     /// subtracts the values in an array from another
     #[inline]
     fn sub(self, other: Self) -> Self {
-        let mut res = self;
-        for i in 0..NUM_FORMANTS {
-            res.x[i] -= other.x[i];
-        }
-        res
+        self.map2(other, |a, b| a - b)
     }
 }
 
@@ -219,11 +194,7 @@ impl Mul for Array {
     /// multiplies the values in two arrays together
     #[inline]
     fn mul(self, other: Self) -> Self {
-        let mut res = self;
-        for i in 0..NUM_FORMANTS {
-            res.x[i] *= other.x[i];
-        }
-        res
+        self.map2(other, |a, b| a * b)
     }
 }
 
@@ -232,11 +203,7 @@ impl Div for Array {
     /// divides the values of one array with another
     #[inline]
     fn div(self, other: Self) -> Self {
-        let mut res = self;
-        for i in 0..NUM_FORMANTS {
-            res.x[i] /= other.x[i];
-        }
-        res
+        self.map2(other, |a, b| a / b)
     }
 }
 
@@ -244,11 +211,8 @@ impl Neg for Array {
     type Output = Self;
     /// negates all values in the array
     #[inline]
-    fn neg(mut self) -> Self {
-        for i in 0..NUM_FORMANTS {
-            self.x[i] = -self.x[i];
-        }
-        self
+    fn neg(self) -> Self {
+        self.map(|x| -x)
     }
 }
 
@@ -339,9 +303,8 @@ impl ArrayValueNoise {
             // also update the noise
             self.current = self.next;
 
-            for i in 0..NUM_FORMANTS {
-                self.next.x[i] = random_f32(&mut self.state);
-            }
+            // next noise step
+            self.next = Array::from_func(|| random_f32(&mut self.state));
         }
 
         // and blend between the current and next
@@ -381,7 +344,7 @@ pub struct SynthesisElem {
 impl SynthesisElem {
     /// make a new synthesis element. For unit gain, formant_amp should sum up to 1
     pub fn new(
-        sample_rate: u32,
+        sample_rate: f32,
         frequency: f32,
         formant_freq: [f32; NUM_FORMANTS],
         formant_decay_bw: [f32; NUM_FORMANTS],
@@ -389,14 +352,16 @@ impl SynthesisElem {
         formant_amp: [f32; NUM_FORMANTS],
         formant_breath: [f32; NUM_FORMANTS],
     ) -> Self {
+        // make a new element, and then resample it to the appropriate sample rate
         Self {
-            frequency: frequency / sample_rate as f32,
-            formant_freq: Array::new(formant_freq) / Array::splat(sample_rate as f32),
-            formant_decay_bw: Array::new(formant_decay_bw) / Array::splat(sample_rate as f32),
-            formant_attack_bw: Array::new(formant_attack_bw) / Array::splat(sample_rate as f32),
+            frequency: frequency,
+            formant_freq: Array::new(formant_freq),
+            formant_decay_bw: Array::new(formant_decay_bw),
+            formant_attack_bw: Array::new(formant_attack_bw),
             formant_amp: Array::new(formant_amp),
             formant_breath: Array::new(formant_breath),
         }
+        .resample(1.0, sample_rate)
     }
 
     /// create a new silent item
@@ -422,16 +387,15 @@ impl SynthesisElem {
     ) -> Self {
         Self {
             frequency: 0.0,
-            formant_freq: Array::new(formant_freq) / Array::splat(DEFAULT_SAMPLE_RATE as f32),
-            formant_decay_bw: Array::new(formant_decay_bw)
-                / Array::splat(DEFAULT_SAMPLE_RATE as f32),
-            formant_attack_bw: Array::new(formant_attack_bw)
-                / Array::splat(DEFAULT_SAMPLE_RATE as f32),
+            formant_freq: Array::new(formant_freq),
+            formant_decay_bw: Array::new(formant_decay_bw),
+            formant_attack_bw: Array::new(formant_attack_bw),
 
             // divide it by the sum of the entire amplitudes, that way we get unit gain
             formant_amp: Array::new(formant_amp) / Array::splat(Array::new(formant_amp).sum()),
             formant_breath: Array::new(formant_breath),
         }
+        .resample(1.0, DEFAULT_SAMPLE_RATE)
     }
     /// blend between this synthesis element and another one
     #[inline]
@@ -448,29 +412,27 @@ impl SynthesisElem {
 
     /// resample the synthesis element to a new sample rate
     #[inline]
-    pub fn resample(self, old_sample_rate: u32, new_sample_rate: u32) -> Self {
+    pub fn resample(self, old_sample_rate: f32, new_sample_rate: f32) -> Self {
         // scale factor for the sample rate
-        let scale = old_sample_rate as f32 / new_sample_rate as f32;
+        let scale = old_sample_rate / new_sample_rate;
 
         // get the new frequency
         let formant_freq = self.formant_freq * Array::splat(scale);
 
-        // drop all formants above nyquist
-        let mut formant_amp = self.formant_amp;
-
-        for (amp, freq) in formant_amp.x.iter_mut().zip(formant_freq.x) {
-            if freq > 0.5 {
-                *amp = 0.0;
-            }
-        }
-
         Self {
-            frequency: self.frequency * scale,
+            // make sure it doesn't go above nyquist
+            frequency: (self.frequency * scale).min(0.5),
             formant_freq: self.formant_freq * Array::splat(scale),
             formant_decay_bw: self.formant_decay_bw * Array::splat(scale),
             formant_attack_bw: self.formant_attack_bw * Array::splat(scale),
-            formant_amp,
-            ..self // this means fill in the rest of the struct with self
+
+            // drop all values above nyquist
+            formant_amp: self
+                .formant_amp
+                .map2(formant_freq, |amp, freq| if freq > 0.5 { 0.0 } else { amp }),
+
+            // leave the rest intact
+            ..self
         }
     }
 
@@ -478,7 +440,10 @@ impl SynthesisElem {
     /// frequency is already divided by the sample rate here
     #[inline]
     pub fn copy_with_frequency(self, frequency: f32) -> Self {
-        Self { frequency, ..self }
+        Self {
+            frequency: frequency.min(0.5),
+            ..self
+        }
     }
 
     /// copy it without any sound
@@ -523,6 +488,37 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
     fn next(&mut self) -> Option<Self::Item> {
         // get the item from the underlying iterator, or return None if we can't
         let elem = self.iter.next()?;
+
+        // generate an anti-aliased saw wave
+
+        // blend it with the noise based on the turbulence and breath
+        // turbulence is extra noise added when the glottis is open, while breath is always on
+
+        // scale it so it's the right amplitude to not make the filter go out of the [-1, 1] range
+
+        // state variable filter
+        // https://cytomic.com/files/dsp/SvfLinearTrapOptimised2.pdf
+        // set the parameters
+        // let g = elem.formant_freq.tan_approx();
+
+        // k = 1 / Q, and Q = f_r / delta_f, where f_r is the resonant frequency, and delta_f is the bandwidth
+        // let k = elem.formant_bw / elem.formant_freq;
+
+        // let a1 = Array::splat(1.0) / (Array::splat(1.0) + g * (g + k));
+        // let a2 = g * a1;
+        // let a3 = g * a2;
+
+        // step the filter forwards to get the next state
+        // let v3 = v0 - self.ic2eq;
+        // let v1 = a1 * self.ic1eq  + a2 * v3;
+        // let v2 = ic2eq + a2 * ic1eq + a3 * v3;
+
+        // update actual state
+        // self.ic1eq = Array::splat(2.0) * v1 - self.ic1eq;
+        // self.ic2eq = Array::splat(2.0) * v2 - self.ic2eq;
+
+        // and the bandpass result
+        // let res = v1.sum();
 
         // update the noise state
         let next_noise = Array::from_func(&mut || random_f32(&mut self.seed));
@@ -686,7 +682,7 @@ impl VoiceStorage {
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub struct Voice {
     /// sample rate this voice is at
-    pub sample_rate: u32,
+    pub sample_rate: f32,
 
     /// phonemes, to generate sound
     pub phonemes: VoiceStorage,
@@ -926,10 +922,10 @@ where
     Self: IntoIterator<Item = SequenceElem> + Sized,
 {
     /// creates a new sequencer, with the given sample rate
-    fn sequence(self, sample_rate: u32) -> Sequencer<Self::IntoIter> {
+    fn sequence(self, sample_rate: f32) -> Sequencer<Self::IntoIter> {
         Sequencer {
             iter: self.into_iter(),
-            delta_time: 1.0 / sample_rate as f32,
+            delta_time: 1.0 / sample_rate,
             cur_elem: None,
             next_elem: None,
             time: 0.0,
@@ -1087,6 +1083,7 @@ pub struct Transcriber<'a, T: Iterator<Item = char>> {
     ruleset: &'a [TranscriptionRule<'a>],
 
     /// whether we are case sensitive to match
+    // TODO: replace this with a better ruleset, as in: each rule becomes lowercase
     case_sensitive: bool,
 
     /// buffer for the phonemes we have now
@@ -1104,6 +1101,7 @@ impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
         let mut search_max = self.ruleset.len();
 
         // buffer to store our text, to see what the current rule is
+        // TODO: this is not needed, all we need is the next character to decide on the next split + storing where we are in the slice
         let mut text_buffer = [' '; TRANSCRIPTION_BUFFER_SIZE];
         let mut text_buffer_size = 0;
 

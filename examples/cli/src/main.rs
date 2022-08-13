@@ -1,6 +1,7 @@
 use grail_rs::{
     IntoIntonator, IntoJitter, IntoSelector, IntoSequencer, IntoSynthesize, IntoTranscriber,
 };
+
 use rodio::{buffer::SamplesBuffer, OutputStream};
 use std::env;
 use std::fs::File;
@@ -222,13 +223,17 @@ fn main() {
         println!("Writing generated sound to {}", output_file);
 
         // and save the file
-        save_wav(&output_file, &generated_audio, sample_rate);
+        save_wav(&output_file, &generated_audio, sample_rate as u32);
     }
 
     // and play it back, if needed
     if play_sound {
         stream_handle
-            .play_raw(SamplesBuffer::new(1, sample_rate, generated_audio.clone()))
+            .play_raw(SamplesBuffer::new(
+                1,
+                sample_rate as u32,
+                generated_audio.clone(),
+            ))
             .expect("failed to play audio");
 
         // wait till the sound stops playing
