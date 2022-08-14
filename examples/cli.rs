@@ -224,6 +224,7 @@ fn main() {
     }
 
     // and play it back, if needed
+    // TODO: clean this up a bit and move CPAL to a generic func
     if play_sound {
         // get cpal's host and output device
         let host = cpal::default_host();
@@ -236,7 +237,7 @@ fn main() {
             .supported_output_configs()
             .expect("No configs found")
             .next()
-            .unwrap()
+            .expect("Failed to get config")
             .with_sample_rate(cpal::SampleRate(sample_rate as u32));
 
         // save audio length
@@ -247,7 +248,7 @@ fn main() {
             cpal::SampleFormat::F32 => device.build_output_stream(
                 &config.into(),
                 move |data: &mut [f32], _| {
-                    for i in data {
+                  for i in data {
                         *i = generated_audio.pop_front().unwrap_or(0.0);
                     }
                 },
@@ -256,7 +257,7 @@ fn main() {
             cpal::SampleFormat::U16 => device.build_output_stream(
                 &config.into(),
                 move |data: &mut [u16], _| {
-                    for i in data {
+                     for i in data {
                         *i = ((generated_audio.pop_front().unwrap_or(0.0) * 0.5 + 0.5)
                             * u16::MAX as f32) as u16;
                     }
@@ -272,10 +273,11 @@ fn main() {
                 },
                 move |err| println!("Error: {:?}", err),
             ),
-        };
+        }.expect("Failed to make stream");
 
+        // play
+        // can't move the expect here, as stream needs to be alive long enough
         stream
-            .expect("Failed to build stream")
             .play()
             .expect("Failed to play audio");
 
