@@ -1,5 +1,3 @@
 /target
-/examples/cli/target
-/examples/cli/Cargo.lock
 Cargo.lock
 *.wav

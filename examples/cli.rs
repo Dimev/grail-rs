@@ -1,8 +1,9 @@
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use grail_rs::{
     IntoIntonator, IntoJitter, IntoSelector, IntoSequencer, IntoSynthesize, IntoTranscriber,
 };
 
-use rodio::{buffer::SamplesBuffer, OutputStream};
+use std::collections::VecDeque;
 use std::env;
 use std::fs::File;
 use std::io::prelude::*;
@@ -25,7 +26,7 @@ fn find_argument(args: &[String], short: &str, long: &str) -> Option<String> {
 }
 
 // save a wav file
-fn save_wav(path: &str, data: &[f32], sample_rate: u32) {
+fn save_wav(path: &str, data: &VecDeque<f32>, sample_rate: u32) {
     // open a file
     if let Ok(mut file) = std::fs::File::create(path) {
         // write the header
@@ -187,12 +188,8 @@ fn main() {
     println!("\"{}\"", to_say);
     println!(" -- {}", voice);
 
-    // get an audio stream
-    let (_stream, stream_handle) =
-        OutputStream::try_default().expect("unable to start audio stream");
-
     // synthesize the speech
-    let mut generated_audio = Vec::with_capacity(grail_rs::DEFAULT_SAMPLE_RATE as usize * 4);
+    let mut generated_audio = VecDeque::with_capacity(grail_rs::DEFAULT_SAMPLE_RATE as usize * 4);
 
     // measure the time it takes to synthesize the audio
     let start = std::time::Instant::now();
@@ -228,17 +225,63 @@ fn main() {
 
     // and play it back, if needed
     if play_sound {
-        stream_handle
-            .play_raw(SamplesBuffer::new(
-                1,
-                sample_rate as u32,
-                generated_audio.clone(),
-            ))
-            .expect("failed to play audio");
+        // get cpal's host and output device
+        let host = cpal::default_host();
+        let device = host.default_output_device().expect("No audio device found");
+
+        println!("Output device: {}", device.name().unwrap());
+
+        // get a config for the stream
+        let config = device
+            .supported_output_configs()
+            .expect("No configs found")
+            .next()
+            .unwrap()
+            .with_sample_rate(cpal::SampleRate(sample_rate as u32));
+
+        // save audio length
+        let audio_len = generated_audio.len();
+
+        // make a stream to play audio with
+        let stream = match config.sample_format() {
+            cpal::SampleFormat::F32 => device.build_output_stream(
+                &config.into(),
+                move |data: &mut [f32], _| {
+                    for i in data {
+                        *i = generated_audio.pop_front().unwrap_or(0.0);
+                    }
+                },
+                move |err| println!("Error: {:?}", err),
+            ),
+            cpal::SampleFormat::U16 => device.build_output_stream(
+                &config.into(),
+                move |data: &mut [u16], _| {
+                    for i in data {
+                        *i = ((generated_audio.pop_front().unwrap_or(0.0) * 0.5 + 0.5)
+                            * u16::MAX as f32) as u16;
+                    }
+                },
+                move |err| println!("Error: {:?}", err),
+            ),
+            cpal::SampleFormat::I16 => device.build_output_stream(
+                &config.into(),
+                move |data: &mut [i16], _| {
+                    for i in data {
+                        *i = (generated_audio.pop_front().unwrap_or(0.0) * i16::MAX as f32) as i16;
+                    }
+                },
+                move |err| println!("Error: {:?}", err),
+            ),
+        };
+
+        stream
+            .expect("Failed to build stream")
+            .play()
+            .expect("Failed to play audio");
 
         // wait till the sound stops playing
         std::thread::sleep(std::time::Duration::from_secs_f32(
-            (generated_audio.len() as f32 / grail_rs::DEFAULT_SAMPLE_RATE as f32) + 0.5,
+            (audio_len as f32 / sample_rate as f32) + 0.5,
         ));
     }
 }

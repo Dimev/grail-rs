@@ -12,4 +12,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# no dependencies?
+# no dependencies needed
+
+[dev-dependencies]
+# but we do need this for examples
+cpal = "0.13.5"
