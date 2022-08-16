@@ -3,7 +3,6 @@ use grail_rs::{
     IntoIntonator, IntoJitter, IntoSelector, IntoSequencer, IntoSynthesize, IntoTranscriber,
 };
 
-use std::collections::VecDeque;
 use std::env;
 use std::fs::File;
 use std::io::prelude::*;
@@ -26,7 +25,7 @@ fn find_argument(args: &[String], short: &str, long: &str) -> Option<String> {
 }
 
 // save a wav file
-fn save_wav(path: &str, data: &VecDeque<f32>, sample_rate: u32) {
+fn save_wav(path: &str, data: &[f32], sample_rate: u32) {
     // open a file
     if let Ok(mut file) = std::fs::File::create(path) {
         // write the header
@@ -189,7 +188,7 @@ fn main() {
     println!(" -- {}", voice);
 
     // synthesize the speech
-    let mut generated_audio = VecDeque::with_capacity(grail_rs::DEFAULT_SAMPLE_RATE as usize * 4);
+    let mut generated_audio = Vec::with_capacity(sample_rate as usize * 4);
 
     // measure the time it takes to synthesize the audio
     let start = std::time::Instant::now();
@@ -201,7 +200,7 @@ fn main() {
             .transcribe(grail_rs::languages::generic())
             .intonate(grail_rs::languages::generic(), grail_rs::voices::generic())
             .select(grail_rs::voices::generic())
-            .sequence(grail_rs::DEFAULT_SAMPLE_RATE)
+            .sequence(sample_rate)
             .jitter(0, grail_rs::voices::generic())
             .synthesize(),
     );
@@ -211,7 +210,7 @@ fn main() {
     // display info on how long the audio file is
     println!(
         "{:.2} seconds of audio, generated in {} microseconds",
-        generated_audio.len() as f32 / grail_rs::DEFAULT_SAMPLE_RATE as f32,
+        generated_audio.len() as f32 / sample_rate as f32,
         duration
     );
 
@@ -243,13 +242,21 @@ fn main() {
         // save audio length
         let audio_len = generated_audio.len();
 
+        // num channels
+        let num_channels = config.channels() as usize;
+
+        // consumer iterator to read the generated audio
+        let mut consumer = generated_audio
+            .into_iter()
+            .flat_map(move |x| std::iter::repeat(x).take(num_channels));
+
         // make a stream to play audio with
         let stream = match config.sample_format() {
             cpal::SampleFormat::F32 => device.build_output_stream(
                 &config.into(),
                 move |data: &mut [f32], _| {
-                  for i in data {
-                        *i = generated_audio.pop_front().unwrap_or(0.0);
+                    for i in data {
+                        *i = consumer.next().unwrap_or(0.0);
                     }
                 },
                 move |err| println!("Error: {:?}", err),
@@ -257,9 +264,9 @@ fn main() {
             cpal::SampleFormat::U16 => device.build_output_stream(
                 &config.into(),
                 move |data: &mut [u16], _| {
-                     for i in data {
-                        *i = ((generated_audio.pop_front().unwrap_or(0.0) * 0.5 + 0.5)
-                            * u16::MAX as f32) as u16;
+                    for i in data {
+                        *i =
+                            ((consumer.next().unwrap_or(0.0) * 0.5 + 0.5) * u16::MAX as f32) as u16;
                     }
                 },
                 move |err| println!("Error: {:?}", err),
@@ -268,18 +275,17 @@ fn main() {
                 &config.into(),
                 move |data: &mut [i16], _| {
                     for i in data {
-                        *i = (generated_audio.pop_front().unwrap_or(0.0) * i16::MAX as f32) as i16;
+                        *i = (consumer.next().unwrap_or(0.0) * i16::MAX as f32) as i16;
                     }
                 },
                 move |err| println!("Error: {:?}", err),
             ),
-        }.expect("Failed to make stream");
+        }
+        .expect("Failed to make stream");
 
         // play
         // can't move the expect here, as stream needs to be alive long enough
-        stream
-            .play()
-            .expect("Failed to play audio");
+        stream.play().expect("Failed to play audio");
 
         // wait till the sound stops playing
         std::thread::sleep(std::time::Duration::from_secs_f32(
