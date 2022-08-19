@@ -7,6 +7,7 @@ use crate::{SynthesisElem, NUM_FORMANTS};
 pub const MKPHON: fn(
     freq: [f32; NUM_FORMANTS],
     bw: [f32; NUM_FORMANTS],
+    smooth: [f32; NUM_FORMANTS],
     turb: [f32; NUM_FORMANTS],
     breath: [f32; NUM_FORMANTS],
     amp: [f32; NUM_FORMANTS],

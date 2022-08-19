@@ -20,20 +20,11 @@ pub mod languages;
 /// Resampling to a different sample rate is possible
 pub const DEFAULT_SAMPLE_RATE: f32 = 44100.0;
 
-/// number of phonemes stored during transcription
-/// This also effectively limits how many phonemes can be in a transcription rule
-pub const PHONEME_BUFFER_SIZE: usize = 64;
-
-/// number of characters stored in the buffer when transcribing
-/// this is effectively the maximum rule length
-pub const TRANSCRIPTION_BUFFER_SIZE: usize = 64;
-
 /// the number of formants to synthesize
-/// TODO: consider using 8 instead?
-pub const NUM_FORMANTS: usize = 12;
+pub const NUM_FORMANTS: usize = 8;
 
 // we'll want to implement these for arrays
-use core::ops::{Add, Div, Mul, Neg, Sub};
+use core::ops::{Add, ControlFlow, Div, Mul, Neg, Sub};
 
 // We'll need some helper functions
 // random number generation
@@ -101,7 +92,6 @@ impl Array {
         Self([val; NUM_FORMANTS])
     }
 
-    // TODO: use this for everything
     /// do something for every value in the array
     #[inline]
     pub fn map<F: Fn(f32) -> f32>(self, f: F) -> Self {
@@ -305,6 +295,9 @@ pub struct SynthesisElem {
     /// formant bandwidth frequencies, normalized to sample rate
     pub formant_bw: Array,
 
+    /// formant smoothness, how much the higher frequencies are filtered out
+    pub formant_smooth: Array,
+
     /// how breathy each formant is. 0 means fully voiced, 1 means full breath
     pub formant_breath: Array,
 
@@ -323,6 +316,7 @@ impl SynthesisElem {
         sample_rate: f32,
         frequency: f32,
         formant_freq: [f32; NUM_FORMANTS],
+        formant_smooth: [f32; NUM_FORMANTS],
         formant_bw: [f32; NUM_FORMANTS],
         formant_breath: [f32; NUM_FORMANTS],
         formant_turb: [f32; NUM_FORMANTS],
@@ -333,6 +327,7 @@ impl SynthesisElem {
             frequency: frequency,
             formant_freq: Array::new(formant_freq),
             formant_bw: Array::new(formant_bw),
+            formant_smooth: Array::new(formant_smooth),
             formant_breath: Array::new(formant_breath),
             formant_turb: Array::new(formant_turb),
             formant_amp: Array::new(formant_amp),
@@ -346,6 +341,7 @@ impl SynthesisElem {
             frequency: 0.25,
             formant_freq: Array::splat(0.25),
             formant_bw: Array::splat(0.25),
+            formant_smooth: Array::splat(0.25),
             formant_breath: Array::splat(0.0),
             formant_turb: Array::splat(0.0),
             formant_amp: Array::splat(0.0),
@@ -357,6 +353,7 @@ impl SynthesisElem {
     pub fn new_phoneme(
         formant_freq: [f32; NUM_FORMANTS],
         formant_bw: [f32; NUM_FORMANTS],
+        formant_smooth: [f32; NUM_FORMANTS],
         formant_turb: [f32; NUM_FORMANTS],
         formant_breath: [f32; NUM_FORMANTS],
         formant_amp: [f32; NUM_FORMANTS],
@@ -365,6 +362,7 @@ impl SynthesisElem {
             frequency: 0.0,
             formant_freq: Array::new(formant_freq),
             formant_bw: Array::new(formant_bw),
+            formant_smooth: Array::new(formant_smooth),
             formant_breath: Array::new(formant_breath),
             formant_turb: Array::new(formant_turb),
 
@@ -379,6 +377,7 @@ impl SynthesisElem {
         Self {
             frequency: self.frequency * (1.0 - alpha) + other.frequency * alpha,
             formant_freq: self.formant_freq.blend(other.formant_freq, alpha),
+            formant_smooth: self.formant_smooth.blend(other.formant_smooth, alpha),
             formant_bw: self.formant_bw.blend(other.formant_bw, alpha),
             formant_turb: self.formant_turb.blend(other.formant_turb, alpha),
             formant_breath: self.formant_breath.blend(other.formant_breath, alpha),
@@ -398,7 +397,7 @@ impl SynthesisElem {
         Self {
             // make sure it doesn't go above nyquist
             frequency: (self.frequency * scale).min(0.5),
-            formant_freq: self.formant_freq * Array::splat(scale),
+            formant_freq: (self.formant_freq * Array::splat(scale)).min(Array::splat(0.5)),
             formant_bw: self.formant_bw * Array::splat(scale),
 
             // drop all values above nyquist
@@ -446,11 +445,14 @@ pub struct Synthesize<T: Iterator<Item = SynthesisElem>> {
     /// phase of the carrier
     phase: f32,
 
-    /// svf filter state 1
-    ic1eq: Array,
+    /// lowpass filter state
+    filter_state_a: Array,
 
-    /// svf filter statee 2
-    ic2eq: Array,
+    /// svf filter state 1 (ic1eq)
+    filter_state_b: Array,
+
+    /// svf filter statee 2 (ic2eq)
+    filter_state_c: Array,
 
     /// noise state
     seed: u32,
@@ -494,22 +496,20 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         }
 
         // generate some noise
-        let noise = random_f32(&mut self.seed);
+        let noise = Array::splat(random_f32(&mut self.seed));
 
-        // noise array, [-1, 1]
-        let normalized_noise = Array::splat(noise * 0.5 + 0.5);
+        // apply a low pass filter, single pole
+        self.filter_state_a = self.filter_state_a
+            + (Array::splat(1.0) - elem.formant_smooth)
+                * (Array::splat(saw_wave) - self.filter_state_a);
 
-        // noise array, [0, 1]
-        let unit_noise = Array::splat(noise);
-
-        // TODO:
-        // apply a single pole filter to smooth it out
-        let glottal_wave = Array::splat(saw_wave);
+        // get the result from the filter
+        let glottal_wave = self.filter_state_a;
 
         // blend it with the noise based on the turbulence and breath
         // turbulence is extra noise added when the glottis is open, while breath is always on
-        let turbulence_wave = (glottal_wave * (Array::splat(1.0) - unit_noise * elem.formant_turb))
-            .blend_multiple(normalized_noise, elem.formant_breath);
+        let turbulence_wave = (glottal_wave * (Array::splat(1.0) - noise * elem.formant_turb))
+            .blend_multiple(noise, elem.formant_breath);
 
         // apply amplitude and scale it
         // makes sure it's the right amplitude to not make the filter go out of the [-1, 1] range
@@ -529,13 +529,13 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         let a3 = g * a2;
 
         // step the filter forwards to get the next state
-        let v3 = v0 - self.ic2eq;
-        let v1 = a1 * self.ic1eq + a2 * v3;
-        let v2 = self.ic2eq + a2 * self.ic1eq + a3 * v3;
+        let v3 = v0 - self.filter_state_c;
+        let v1 = a1 * self.filter_state_b + a2 * v3;
+        let v2 = self.filter_state_c + a2 * self.filter_state_b + a3 * v3;
 
         // update actual state
-        self.ic1eq = Array::splat(2.0) * v1 - self.ic1eq;
-        self.ic2eq = Array::splat(2.0) * v2 - self.ic2eq;
+        self.filter_state_b = Array::splat(2.0) * v1 - self.filter_state_b;
+        self.filter_state_c = Array::splat(2.0) * v2 - self.filter_state_c;
 
         // and the bandpass result
         let res = v1.sum() * 0.5;
@@ -555,8 +555,9 @@ where
         Synthesize {
             iter: self.into_iter(),
             phase: 0.0,
-            ic1eq: Array::splat(0.0),
-            ic2eq: Array::splat(0.0),
+            filter_state_a: Array::splat(0.0),
+            filter_state_b: Array::splat(0.0),
+            filter_state_c: Array::splat(0.0),
             seed: 0,
         }
     }
@@ -1021,97 +1022,88 @@ pub struct Transcriber<'a, T: Iterator<Item = char>> {
     case_sensitive: bool,
 
     /// buffer for the phonemes we have now
-    buffer: [Phoneme; PHONEME_BUFFER_SIZE],
-
-    /// current size of the buffer
-    buffer_size: usize,
+    buffer: &'a [Phoneme],
 }
+
+// silent buffer
+const SILENCE: &'static [Phoneme] = &[Phoneme::Silence];
 
 impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
     type Item = Phoneme;
     fn next(&mut self) -> Option<Self::Item> {
-        // min and max search range
-        let mut search_min = 0;
-        let mut search_max = self.ruleset.len();
-
-        // buffer to store our text, to see what the current rule is
-        // TODO: this is not needed, all we need is the next character to decide on the next split + storing where we are in the slice
-        let mut text_buffer = [' '; TRANSCRIPTION_BUFFER_SIZE];
-        let mut text_buffer_size = 0;
-
-        // loop as long as we need a phoneme
-        while self.buffer_size == 0 {
-            // try and get an item
-            if let Some(character) = self.iter.next() {
-                // add it to the buffer if possible
-                if text_buffer_size < text_buffer.len() {
-                    // make sure it's the right case
-                    text_buffer[text_buffer_size] = if self.case_sensitive {
-                        character.to_ascii_lowercase()
+        // if our buffer is empty, try and make a new one
+        if self.buffer.len() == 0 {
+            // find the right buffer search range
+            // using try fold we can stop once we found the right value
+            self.buffer = match self
+                .iter
+                .by_ref()
+                .map(|x| {
+                    if self.case_sensitive {
+                        x
                     } else {
-                        character
-                    };
-                    text_buffer_size += 1;
-                }
-            } else {
-                // we won't find a new rule, so stop
-                break;
-            }
+                        x.to_ascii_lowercase()
+                    }
+                })
+                .enumerate()
+                .try_fold(
+                    (0, self.ruleset.len()),
+                    |(search_min, search_max), (index, character)| {
+                        // find the new search range
+                        // now that we have a new item, we can reduce the search range
+                        // this is binary search, where the left half is where the lower range is lexiographically lower than the current buffer content
+                        // because we only get one char at a time, we can assume that the previous N characters were already found and reduced the range
+                        // so no need to keep those around anymore
+                        let new_min = self.ruleset[search_min..search_max].partition_point(|x| {
+                            x.string
+                                .chars()
+                                .skip(index)
+                                .next()
+                                .map_or(true, |x| x < character)
+                        }) + search_min;
 
-            // now that we have a new item, we can reduce the search range
-            // this is binary search, where the left half is where the lower range is lexiographically lower than the current buffer content
-            let new_min = self.ruleset[search_min..search_max].partition_point(|x| {
-                x.string
-                    .chars()
-                    .take(text_buffer_size)
-                    .lt(text_buffer[..text_buffer_size].iter().cloned())
-            }) + search_min;
+                        // same for the upper range, but now it's lower or equal
+                        let new_max = self.ruleset[search_min..search_max].partition_point(|x| {
+                            x.string
+                                .chars()
+                                .skip(index)
+                                .next()
+                                .map_or(false, |x| x <= character)
+                        }) + search_min;
 
-            // same for the upper range, but now it's lower or equal
-            let new_max = self.ruleset[search_min..search_max].partition_point(|x| {
-                x.string
-                    .chars()
-                    .take(text_buffer_size)
-                    .le(text_buffer[..text_buffer_size].iter().cloned())
-            }) + search_min;
+                        // now decide on where to go
+                        if new_min + 1 == new_max
+                            && self.ruleset[new_min].string.chars().count() == index + 1
+                        {
+                            // equal if is one bigger than the max, we found a rule
+                            // also make sure we have the entire rule, so we don't leave out a bit
+                            ControlFlow::Break(self.ruleset[new_min].phonemes)
+                        } else if new_min == new_max {
+                            // if they are equal, no rule was found, so just emit silence
+                            ControlFlow::Break(SILENCE)
+                        } else {
+                            // otherwise, we are still running
+                            ControlFlow::Continue((new_min, new_max))
+                        }
+                    },
+                ) {
+                // return the found buffer
+                ControlFlow::Break(x) => x,
 
-            // if the ranges are equal, no rule was found, so insert a silence
-            if new_min == new_max && self.buffer_size < self.buffer.len() {
-                self.buffer[self.buffer_size] = Phoneme::Silence;
-                self.buffer_size += 1;
-            } else if new_min + 1 == new_max
-                && self.ruleset[new_min] // also make sure that the rule equals our text, so we don't cut it off early
-                    .string
-                    .chars()
-                    .eq(text_buffer[..text_buffer_size].iter().cloned())
-            {
-                // if it's one, then we found a rule, so add it
-                for phoneme in self.ruleset[new_min]
-                    .phonemes
-                    .iter()
-                    .take(self.buffer.len() - self.buffer_size)
-                {
-                    self.buffer[self.buffer_size] = *phoneme;
-                    self.buffer_size += 1;
-                }
-                // also empty the buffer
-                // this is to ensure we can continue parsing if this rule doesn't produce phonemes
-                text_buffer_size = 0;
-            }
-
-            // and set the range for the next iteration
-            search_min = new_min;
-            search_max = new_max;
+                // if it was still on continue, the underlying iterator has ended
+                // this means we won't find any new rule, so stop
+                _ => return None,
+            };
         }
 
-        // if we have items in the phoneme buffer, return one
-        if self.buffer_size > 0 {
-            // pop the item
-            self.buffer_size -= 1;
-            Some(self.buffer[self.buffer_size])
-        } else {
-            None
-        }
+        // try and get the first item if we have that
+        let result = self.buffer.get(0);
+
+        // remove the first item if we can, and set the buffer to the rest of the remaining buffer
+        self.buffer = self.buffer.get(1..).unwrap_or(&[]);
+
+        // return the result
+        result.map(|x| *x)
     }
 }
 
@@ -1123,8 +1115,7 @@ where
         Transcriber {
             iter: self.into_iter(),
             ruleset: language.rules,
-            buffer: [Phoneme::Silence; PHONEME_BUFFER_SIZE],
-            buffer_size: 1,
+            buffer: SILENCE,
             case_sensitive: language.case_sensitive,
         }
     }

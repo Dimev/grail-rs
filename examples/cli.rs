@@ -27,65 +27,65 @@ fn find_argument(args: &[String], short: &str, long: &str) -> Option<String> {
 // save a wav file
 fn save_wav(path: &str, data: &[f32], sample_rate: u32) {
     // open a file
-    if let Ok(mut file) = std::fs::File::create(path) {
-        // write the header
-        // riff
-        file.write(b"RIFF").expect("Failed to write");
+    let mut file = std::fs::File::create(path).expect("Failed to create file");
 
-        // file size, or sub chunk 2 size + 36
-        file.write(&((36 + data.len() * 2) as i32).to_le_bytes())
-            .expect("Failed to write");
+    // write the header
+    // riff
+    file.write(b"RIFF").expect("Failed to write");
 
-        // wave header
-        file.write(b"WAVE").expect("Failed to write");
+    // file size, or sub chunk 2 size + 36
+    file.write(&((36 + data.len() * 2) as i32).to_le_bytes())
+        .expect("Failed to write");
 
-        // format
-        file.write(b"fmt ").expect("Failed to write");
+    // wave header
+    file.write(b"WAVE").expect("Failed to write");
 
-        // sub chunk size
-        file.write(&(16 as i32).to_le_bytes())
-            .expect("Failed to write");
+    // format
+    file.write(b"fmt ").expect("Failed to write");
 
-        // format, just 1 as we want pcm
-        file.write(&(1 as i16).to_le_bytes())
-            .expect("Failed to write");
+    // sub chunk size
+    file.write(&(16 as i32).to_le_bytes())
+        .expect("Failed to write");
 
-        // 1 channel
-        file.write(&(1 as i16).to_le_bytes())
-            .expect("Failed to write");
+    // format, just 1 as we want pcm
+    file.write(&(1 as i16).to_le_bytes())
+        .expect("Failed to write");
 
-        // sample rate
-        file.write(&(sample_rate as i32).to_le_bytes())
-            .expect("Failed to write");
+    // 1 channel
+    file.write(&(1 as i16).to_le_bytes())
+        .expect("Failed to write");
 
-        // byte rate, sample rate * num channels * bytes per sample
-        file.write(&(sample_rate as i32 * 2).to_le_bytes())
-            .expect("Failed to write");
+    // sample rate
+    file.write(&(sample_rate as i32).to_le_bytes())
+        .expect("Failed to write");
 
-        // block align, num channels * bytes per sample
-        file.write(&(2 as i16).to_le_bytes())
-            .expect("Failed to write");
+    // byte rate, sample rate * num channels * bytes per sample
+    file.write(&(sample_rate as i32 * 2).to_le_bytes())
+        .expect("Failed to write");
 
-        // bits per sample
-        file.write(&(16 as i16).to_le_bytes())
-            .expect("Failed to write");
+    // block align, num channels * bytes per sample
+    file.write(&(2 as i16).to_le_bytes())
+        .expect("Failed to write");
 
-        // data
-        file.write(b"data").expect("Failed to write");
+    // bits per sample
+    file.write(&(16 as i16).to_le_bytes())
+        .expect("Failed to write");
 
-        // sub chunk size, num samples * num channels * bytes per sample
-        file.write(&(data.len() as i32 * 2).to_le_bytes())
-            .expect("Failed to write");
+    // data
+    file.write(b"data").expect("Failed to write");
 
-        // and write the actual sound data
-        for i in data.iter().map(|x| (x * i16::MAX as f32) as i16) {
-            // write the sample
-            file.write(&i.to_le_bytes()).expect("Failed to write");
-        }
+    // sub chunk size, num samples * num channels * bytes per sample
+    file.write(&(data.len() as i32 * 2).to_le_bytes())
+        .expect("Failed to write");
 
-        // and store
-        file.flush().expect("Failed to write");
+    // and write the actual sound data
+    for i in data.iter().map(|x| (x * i16::MAX as f32) as i16) {
+        // write the sample
+        file.write(&i.to_le_bytes()).expect("Failed to write");
     }
+
+    // and store
+    file.flush().expect("Failed to write");
 }
 
 fn main() {
