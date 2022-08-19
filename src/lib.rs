@@ -24,7 +24,7 @@ pub const DEFAULT_SAMPLE_RATE: f32 = 44100.0;
 pub const NUM_FORMANTS: usize = 8;
 
 // we'll want to implement these for arrays
-use core::ops::{Add, ControlFlow, Div, Mul, Neg, Sub};
+use core::ops::{Add, AddAssign, ControlFlow, Div, Mul, Neg, Sub};
 
 // We'll need some helper functions
 // random number generation
@@ -143,6 +143,14 @@ impl Add for Array {
     #[inline]
     fn add(self, other: Self) -> Self {
         self.map2(other, |a, b| a + b)
+    }
+}
+
+impl AddAssign for Array {
+    /// adds the other array to this array
+    #[inline]
+    fn add_assign(&mut self, other: Self) {
+        *self = *self + other;
     }
 }
 
@@ -499,9 +507,8 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         let noise = Array::splat(random_f32(&mut self.seed));
 
         // apply a low pass filter, single pole
-        self.filter_state_a = self.filter_state_a
-            + (Array::splat(1.0) - elem.formant_smooth)
-                * (Array::splat(saw_wave) - self.filter_state_a);
+        self.filter_state_a += (Array::splat(1.0) - elem.formant_smooth)
+            * (Array::splat(saw_wave) - self.filter_state_a);
 
         // get the result from the filter
         let glottal_wave = self.filter_state_a;
@@ -683,8 +690,7 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Jitter<T> {
 
         // change them in the element
         elem.frequency += freq * self.delta_frequency;
-        elem.formant_freq =
-            elem.formant_freq + formant_freq * Array::splat(self.delta_formant_freq);
+        elem.formant_freq += formant_freq * Array::splat(self.delta_formant_freq);
 
         // we don't want it to get *louder*, so make sure it only becomes softer by doing (1 + [-1, 1]) / 2, which results in [0, 1]
         // we'll then multiply it by the appropriate amplitude so we can't end up with negative amplitudes for some sounds
