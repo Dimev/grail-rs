@@ -32,7 +32,7 @@ fn main() {
         .transcribe(grail_rs::languages::generic())
         .intonate(grail_rs::languages::generic(), grail_rs::voices::generic())
         .select(grail_rs::voices::generic())
-        .sequence(grail_rs::voices::generic().sample_rate)
+        .sequence(grail_rs::voices::generic())
         .jitter(0, grail_rs::voices::generic())
         .synthesize()
         .flat_map(move |x| std::iter::repeat(x).take(num_channels));

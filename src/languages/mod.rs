@@ -14,6 +14,14 @@ pub const fn generic() -> Language<'static> {
                 phonemes: &[Phoneme::E],
             },
             TranscriptionRule {
+                string: "i",
+                phonemes: &[Phoneme::A],
+            },
+            TranscriptionRule {
+                string: "ii",
+                phonemes: &[Phoneme::E, Phoneme::A],
+            },
+            TranscriptionRule {
                 string: "oui",
                 phonemes: &[Phoneme::A, Phoneme::E, Phoneme::A],
             },

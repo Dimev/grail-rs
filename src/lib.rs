@@ -67,6 +67,18 @@ pub fn tan_approx(x: f32) -> f32 {
         / ((x + 0.5) * (5.0 - 4.0 * (1.0 - x) * x) * (0.5 - x))
 }
 
+/// Approximation of -exp(TAU * x)
+/// accurate for the range [0, 1]
+#[inline]
+pub fn exp_approx(x: f32) -> f32 {
+    // exp(-2 * pi * x) ~ (1 - x) ^ 5
+    let o = 1.0 - x;
+    let o2 = o * o;
+
+    // (1 - x) ^ 5
+    o2 * o2 * o
+}
+
 // next, let's make a struct to help storing arrays, and do operations on them
 
 /// Array, containing NUM_FORMANTS floats. Used to store per-formant data
@@ -132,6 +144,12 @@ impl Array {
     #[inline]
     pub fn tan_approx(self) -> Self {
         self.map(|x| tan_approx(x))
+    }
+
+    /// exp(-tau * x) approximation
+    #[inline]
+    pub fn exp_approx(self) -> Self {
+        self.map(|x| exp_approx(x))
     }
 }
 
@@ -407,6 +425,7 @@ impl SynthesisElem {
             frequency: (self.frequency * scale).min(0.5),
             formant_freq: (self.formant_freq * Array::splat(scale)).min(Array::splat(0.5)),
             formant_bw: self.formant_bw * Array::splat(scale),
+            formant_smooth: self.formant_smooth * Array::splat(scale),
 
             // drop all values above nyquist
             formant_amp: self
@@ -493,7 +512,7 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         };
 
         // saw wave
-        let saw_wave = (2.0 * self.phase - 1.0) - polyblep;
+        let saw_wave = Array::splat((2.0 * self.phase - 1.0) - polyblep);
 
         // increment phase
         self.phase += elem.frequency;
@@ -504,24 +523,33 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
         }
 
         // generate some noise
-        let noise = Array::splat(random_f32(&mut self.seed));
+        let noise = random_f32(&mut self.seed);
+
+        // [-1, 1] range
+        let normalized_noise = Array::splat(noise);
+
+        // [0, 1] range
+        let unit_noise = Array::splat(noise * 0.5 + 0.5);
+
+        // apply turbulence and noise
+        let turbulence_wave = (saw_wave * (Array::splat(1.0) - unit_noise * elem.formant_turb))
+            .blend_multiple(normalized_noise, elem.formant_breath);
+
+        // get the filter alpha
+        // we can the parameter for the filter from the cutoff frequency with exp(-2*pi*x), which is exp_approx!
+        let alpha = elem.formant_smooth.exp_approx();
 
         // apply a low pass filter, single pole
-        self.filter_state_a += (Array::splat(1.0) - elem.formant_smooth)
-            * (Array::splat(saw_wave) - self.filter_state_a);
+        self.filter_state_a +=
+            (Array::splat(1.0) - alpha) * (turbulence_wave - self.filter_state_a);
 
         // get the result from the filter
         let glottal_wave = self.filter_state_a;
 
-        // blend it with the noise based on the turbulence and breath
-        // turbulence is extra noise added when the glottis is open, while breath is always on
-        let turbulence_wave = (glottal_wave * (Array::splat(1.0) - noise * elem.formant_turb))
-            .blend_multiple(noise, elem.formant_breath);
-
         // apply amplitude and scale it
         // makes sure it's the right amplitude to not make the filter go out of the [-1, 1] range
         // TODO: how
-        let v0 = turbulence_wave * elem.formant_amp;
+        let v0 = glottal_wave * elem.formant_amp;
 
         // state variable filter
         // https://cytomic.com/files/dsp/SvfLinearTrapOptimised2.pdf
@@ -862,11 +890,11 @@ pub trait IntoSequencer
 where
     Self: IntoIterator<Item = SequenceElem> + Sized,
 {
-    /// creates a new sequencer, with the given sample rate
-    fn sequence(self, sample_rate: f32) -> Sequencer<Self::IntoIter> {
+    /// creates a new sequencer, from a given voice
+    fn sequence(self, voice: Voice) -> Sequencer<Self::IntoIter> {
         Sequencer {
             iter: self.into_iter(),
-            delta_time: 1.0 / sample_rate,
+            delta_time: 1.0 / voice.sample_rate,
             cur_elem: None,
             next_elem: None,
             time: 0.0,
@@ -1001,7 +1029,7 @@ pub trait IntoIntonator
 where
     Self: IntoIterator<Item = Phoneme> + Sized,
 {
-    fn intonate(self, language: Language, voice: Voice) -> Intonator<Self::IntoIter> {
+    fn intonate(self, _language: Language, voice: Voice) -> Intonator<Self::IntoIter> {
         Intonator {
             iter: self.into_iter(),
             center_frequency: voice.center_frequency,
@@ -1077,6 +1105,13 @@ impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
                                 .map_or(false, |x| x <= character)
                         }) + search_min;
 
+                        /*println!(
+                            "min: {}, max: {}, set: {:?}",
+                            new_min,
+                            new_max,
+                            &self.ruleset[search_min..search_max]
+                        );*/
+
                         // now decide on where to go
                         if new_min + 1 == new_max
                             && self.ruleset[new_min].string.chars().count() == index + 1
@@ -1084,7 +1119,7 @@ impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
                             // equal if is one bigger than the max, we found a rule
                             // also make sure we have the entire rule, so we don't leave out a bit
                             ControlFlow::Break(self.ruleset[new_min].phonemes)
-                        } else if new_min == new_max {
+                        } else if new_min >= new_max {
                             // if they are equal, no rule was found, so just emit silence
                             ControlFlow::Break(SILENCE)
                         } else {
@@ -1128,6 +1163,79 @@ where
 }
 
 impl<T> IntoTranscriber for T where T: IntoIterator<Item = char> + Sized {}
+
+// test the transcriber for correct behaviour
+#[test]
+fn transcribe_unique() {
+    let mut transcriber = Transcriber {
+        iter: "abc".chars(),
+        ruleset: &[
+            TranscriptionRule {
+                string: "ab",
+                phonemes: &[Phoneme::A],
+            },
+            TranscriptionRule {
+                string: "c",
+                phonemes: &[Phoneme::E],
+            },
+        ],
+        buffer: &[],
+        case_sensitive: false,
+    };
+
+    assert_eq!(transcriber.next(), Some(Phoneme::A));
+    assert_eq!(transcriber.next(), Some(Phoneme::E));
+    assert_eq!(transcriber.next(), None);
+}
+
+#[test]
+fn transcribe_same_start() {
+    let mut transcriber = Transcriber {
+        iter: "abacabc".chars(),
+        ruleset: &[
+            TranscriptionRule {
+                string: "ab",
+                phonemes: &[Phoneme::A],
+            },
+            TranscriptionRule {
+                string: "ac",
+                phonemes: &[Phoneme::E],
+            },
+        ],
+        buffer: &[],
+        case_sensitive: false,
+    };
+
+    assert_eq!(transcriber.next(), Some(Phoneme::A));
+    assert_eq!(transcriber.next(), Some(Phoneme::E));
+    assert_eq!(transcriber.next(), Some(Phoneme::A));
+    assert_eq!(transcriber.next(), Some(Phoneme::Silence));
+    assert_eq!(transcriber.next(), None);
+}
+
+#[test]
+fn transcribe_same_char_different_length() {
+    let mut transcriber = Transcriber {
+        iter: "aaa".chars(),
+        ruleset: &[
+            TranscriptionRule {
+                string: "a",
+                phonemes: &[Phoneme::A],
+            },
+            TranscriptionRule {
+                string: "aa",
+                phonemes: &[Phoneme::E],
+            },
+        ],
+        buffer: &[],
+        case_sensitive: false,
+    };
+
+    // should match the longest rule when possible, so aa first, then a
+    assert_eq!(transcriber.next(), Some(Phoneme::E));
+    assert_eq!(transcriber.next(), Some(Phoneme::A));
+    assert_eq!(transcriber.next(), None);
+}
 
 // Here's how it will work
 // synthesizer iterator to generate sound

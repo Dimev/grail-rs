@@ -200,7 +200,7 @@ fn main() {
             .transcribe(grail_rs::languages::generic())
             .intonate(grail_rs::languages::generic(), grail_rs::voices::generic())
             .select(grail_rs::voices::generic())
-            .sequence(sample_rate)
+            .sequence(grail_rs::voices::generic())
             .jitter(0, grail_rs::voices::generic())
             .synthesize(),
     );
