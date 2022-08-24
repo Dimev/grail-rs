@@ -24,11 +24,9 @@ pub const DEFAULT_SAMPLE_RATE: f32 = 44100.0;
 pub const NUM_FORMANTS: usize = 8;
 
 // we'll want to implement these for arrays
-use core::{
-    borrow::Borrow,
-    iter::Peekable,
-    ops::{Add, AddAssign, Div, Mul, Neg, Sub},
-};
+use core::ops::{Add, AddAssign, Div, Mul, Neg, Sub};
+
+use core::iter::Peekable;
 
 // We'll need some helper functions
 // random number generation
@@ -1123,24 +1121,23 @@ impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
                     .map_or(false, |x| x <= character)
             }) + search_min;
 
-            // TODO: move to peek instead of next
-            // if peek results in an invalid range, pick the first item in the range if it matches the length
-            // if it results in a valid range, advance the iterator and continue
-            // otherwise, emit silence
-
             // now decide on where to go
             if new_min >= new_max && self.ruleset[search_min].string.chars().count() == index {
-                // if the new range is invalid, but the old search min range matched, grab that
+                // if the new range is invalid, but the old search range lower bound matched, grab that
                 self.buffer = self.ruleset[search_min].phonemes;
             } else if new_min >= new_max {
                 // if they are not equal but no previous search range matched, return silence
                 self.buffer = SILENCE;
+
+                // advance, as we don't need this character for the next iteration, because it was part of a garbled sequence anyway
+                self.iter.next();
             } else {
                 // otherwise, we are still running
                 search_min = new_min;
                 search_max = new_max;
                 index += 1;
 
+                // advance so we can check the next character
                 self.iter.next();
 
                 // if this fails, we won't be able to peek next iteration, so see if we can emit the final rule
@@ -1148,83 +1145,12 @@ impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
                     && self.ruleset[search_min].string.chars().count() == index
                 {
                     self.buffer = self.ruleset[search_min].phonemes;
+                } else if self.iter.peek().is_none() {
+                    // if no match could be found, indicate so by emitting a silence
+                    self.buffer = SILENCE;
                 }
             }
         }
-        /*
-                // if our buffer is empty, try and make a new one
-                if self.buffer.len() == 0 {
-                    // find the right buffer search range
-                    // using try fold we can stop once we found the right value
-                    self.buffer = match self
-                        .iter
-                        .by_ref()
-                        .map(|x| {
-                            if self.case_sensitive {
-                                x
-                            } else {
-                                x.to_ascii_lowercase()
-                            }
-                        })
-                        .enumerate()
-                        .try_fold(
-                            (0, self.ruleset.len(), 0),
-                            |(search_min, search_max, _), (index, character)| {
-                                // find the new search range
-                                // now that we have a new item, we can reduce the search range
-                                // this is binary search, where the left half is where the lower range is lexiographically lower than the current buffer content
-                                // because we only get one char at a time, we can assume that the previous N characters were already found and reduced the range
-                                // so no need to keep those around anymore
-                                let new_min = self.ruleset[search_min..search_max].partition_point(|x| {
-                                    x.string
-                                        .chars()
-                                        .skip(index)
-                                        .next()
-                                        .map_or(true, |x| x < character)
-                                }) + search_min;
-
-                                // same for the upper range, but now it's lower or equal
-                                let new_max = self.ruleset[search_min..search_max].partition_point(|x| {
-                                    x.string
-                                        .chars()
-                                        .skip(index)
-                                        .next()
-                                        .map_or(false, |x| x <= character)
-                                }) + search_min;
-
-                                // now decide on where to go
-                                if new_min + 1 == new_max
-                                    && self.ruleset[new_min].string.chars().count() == index + 1
-                                {
-                                    // equal if is one bigger than the max, we found a rule
-                                    // also make sure we have the entire rule, so we don't leave out a bit
-                                    ControlFlow::Break(self.ruleset[new_min].phonemes)
-                                } else if new_min >= new_max {
-                                    // if they are equal, no rule was found, so just emit silence
-                                    ControlFlow::Break(SILENCE)
-                                } else {
-                                    // otherwise, we are still running
-                                    ControlFlow::Continue((new_min, new_max, index + 1))
-                                }
-                            },
-                        ) {
-                        // return the found buffer
-                        ControlFlow::Break(x) => x,
-
-                        // if it was still on continue and the lowest item we have is the exact length of things we found,
-                        // then that's the right item
-                        ControlFlow::Continue((min, _, index))
-                            if self.ruleset[min].string.chars().count() == index =>
-                        {
-                            self.ruleset[min].phonemes
-                        }
-
-                        // if it was still on continue, the underlying iterator has ended
-                        // this means we won't find any new rule, so stop
-                        _ => return None,
-                    };
-                }
-        */
         // try and get the first item if we have that
         let result = self.buffer.get(0);
 
@@ -1279,7 +1205,7 @@ fn transcribe_unique() {
 #[test]
 fn transcribe_same_start() {
     let mut transcriber = Transcriber {
-        iter: "abacabc".chars().peekable(),
+        iter: "abacab".chars().peekable(),
         ruleset: &[
             TranscriptionRule {
                 string: "ab",
@@ -1297,7 +1223,6 @@ fn transcribe_same_start() {
     assert_eq!(transcriber.next(), Some(Phoneme::A));
     assert_eq!(transcriber.next(), Some(Phoneme::E));
     assert_eq!(transcriber.next(), Some(Phoneme::A));
-    assert_eq!(transcriber.next(), Some(Phoneme::Silence));
     assert_eq!(transcriber.next(), None);
 }
 
@@ -1351,6 +1276,56 @@ fn transcribe_same_char_different_length_cutoff() {
     // should match the longest rule when possible, so aa first, then a
     assert_eq!(transcriber.next(), Some(Phoneme::A));
     assert_eq!(transcriber.next(), Some(Phoneme::E));
+    assert_eq!(transcriber.next(), None);
+}
+
+#[test]
+fn transcribe_skip_no_matches() {
+    let mut transcriber = Transcriber {
+        iter: "abuac".chars().peekable(),
+        ruleset: &[
+            TranscriptionRule {
+                string: "ab",
+                phonemes: &[Phoneme::A],
+            },
+            TranscriptionRule {
+                string: "ac",
+                phonemes: &[Phoneme::E],
+            },
+        ],
+        buffer: &[],
+        case_sensitive: false,
+    };
+
+    // should match the longest rule when possible, so aa first, then a
+    assert_eq!(transcriber.next(), Some(Phoneme::A));
+    assert_eq!(transcriber.next(), Some(Phoneme::Silence));
+    assert_eq!(transcriber.next(), Some(Phoneme::E));
+    assert_eq!(transcriber.next(), None);
+}
+
+#[test]
+fn transcribe_skip_partial_match_at_end() {
+    let mut transcriber = Transcriber {
+        iter: "abaca".chars().peekable(),
+        ruleset: &[
+            TranscriptionRule {
+                string: "ab",
+                phonemes: &[Phoneme::A],
+            },
+            TranscriptionRule {
+                string: "ac",
+                phonemes: &[Phoneme::E],
+            },
+        ],
+        buffer: &[],
+        case_sensitive: false,
+    };
+
+    // should match the longest rule when possible, so aa first, then a
+    assert_eq!(transcriber.next(), Some(Phoneme::A));
+    assert_eq!(transcriber.next(), Some(Phoneme::E));
+    assert_eq!(transcriber.next(), Some(Phoneme::Silence));
     assert_eq!(transcriber.next(), None);
 }
 
