@@ -145,13 +145,13 @@ impl Array {
     /// hyperbolic tangent approximation
     #[inline]
     pub fn tan_approx(self) -> Self {
-        self.map(|x| tan_approx(x))
+        self.map(tan_approx)
     }
 
     /// exp(-tau * x) approximation
     #[inline]
     pub fn exp_approx(self) -> Self {
-        self.map(|x| exp_approx(x))
+        self.map(exp_approx)
     }
 }
 
@@ -352,7 +352,7 @@ impl SynthesisElem {
     ) -> Self {
         // make a new element, and then resample it to the appropriate sample rate
         Self {
-            frequency: frequency,
+            frequency,
             formant_freq: Array::new(formant_freq),
             formant_bw: Array::new(formant_bw),
             formant_smooth: Array::new(formant_smooth),
@@ -620,41 +620,78 @@ fn synthesize_resampled() {}
 // first, set up the enum for all phonemes
 // TODO: IPA or some reduced set?
 // reducet set makes it easier to make voices
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub enum Phoneme {
-    /// Silence, somewhat special as blending the phoneme to this will only blend the amplitude
-    Silence,
-    A, // a
-    E, // e
-}
 
-// next up, a voice storage
-// this is not a full voice, but instead all phonemes, so it's easier to pass around
-// we won't make a constructor for it due to it not really being needed
-/// Stores a synthesis element for each phoneme
-#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
-pub struct VoiceStorage {
-    pub a: SynthesisElem,
-    pub e: SynthesisElem,
-}
+// macro to generate the phonemes
+// takes list of (uppercase lowercase example) for each phoneme,
+// then generates the phoneme enum and storage and it's functions
+macro_rules! make_phonemes {
+    ($($upper:ident $lower:ident $example:ident,)*) => {
+        
+        /// Represents all phonemes.
+        /// This is a subset of the IPA,
+        /// with a few extra special phonemes to help with properly converting the sounds represented in grail to actual sounds
+        /// Most notable grail can't properly represent diphthongs and plosives with a single synthesis element,
+        /// so it's required to add a few special marker phonemes to add these
+        #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+        pub enum Phoneme {
+            /// Silence, will fade in/fade out any other phonemes surrounding it
+            /// use when silence is intended
+            Silence,
+            
+            /// glottal stop, behaves similarly to silence, 
+            /// but should be used when a glottal stop is intended.
+            /// This is required for some phonemes to sound correct
+            Stop,
+            
+            /// Blend the next phoneme into the other seamlessly, useful for indicating diphthongs
+            Glide,
+            // insert all uppercase phonemes into the enum, with the examples as in the documentation
+            $(
+                #[doc = concat!("as in ", stringify!($example))]
+                $upper,
+            )*
+        }
 
-impl VoiceStorage {
-    /// retreive a synthesis elem based on the given phoneme
-    pub fn get(self, phoneme: Phoneme) -> Option<SynthesisElem> {
-        match phoneme {
-            Phoneme::Silence => None,
-            Phoneme::A => Some(self.a),
-            Phoneme::E => Some(self.e),
+        /// Stores all synthesis elements for the phonemes that have an associated sound
+        #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
+        pub struct VoiceStorage {
+            // insert all lowercase phonemes as a field
+            $(
+                #[doc = concat!("as in ", stringify!($example))]
+                pub $lower: SynthesisElem,
+            )*
+        }
+
+        impl VoiceStorage {
+
+            /// retrieve a synthesis elem based on the given phoneme
+            pub fn get(self, phoneme: Phoneme) -> Option<SynthesisElem> {
+                match phoneme {
+                    Phoneme::Silence | Phoneme::Stop | Phoneme::Glide => None,
+                    $(
+                        Phoneme::$upper => Some(self.$lower),
+                    )*
+                }
+            }
+
+            /// run a function on all phonemes
+            pub fn for_all(&mut self, func: fn(Phoneme, &mut SynthesisElem)) {
+                $(
+                    func(Phoneme::$upper, &mut self.$lower);
+                )*
+            }
         }
     }
-
-    /// run a function on all phonemes
-    pub fn for_all(&mut self, func: fn(Phoneme, &mut SynthesisElem)) {
-        func(Phoneme::A, &mut self.a);
-        func(Phoneme::E, &mut self.e);
-    }
 }
 
+// make the phoneme structs
+// see https://en.wikipedia.org/wiki/Help:IPA
+// TODO!
+make_phonemes!(
+    A a test,
+    E e test,  
+);
+  
 // and next, the full voice
 // which is just the voice storage + extra parameters for intonation
 
@@ -1078,7 +1115,7 @@ pub struct Transcriber<'a, T: Iterator<Item = char>> {
 }
 
 // silent buffer
-const SILENCE: &'static [Phoneme] = &[Phoneme::Silence];
+const SILENCE: &[Phoneme] = &[Phoneme::Silence];
 
 impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
     type Item = Phoneme;
@@ -1089,7 +1126,7 @@ impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
         let mut index = 0;
 
         // search as long as we haven't found a match
-        while self.buffer.len() == 0 {
+        while self.buffer.is_empty() {
             // get the current character
             let character = self.iter.peek().map(|x| {
                 if self.case_sensitive {
@@ -1107,8 +1144,7 @@ impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
             let new_min = self.ruleset[search_min..search_max].partition_point(|x| {
                 x.string
                     .chars()
-                    .skip(index)
-                    .next()
+                    .nth(index)
                     .map_or(true, |x| x < character)
             }) + search_min;
 
@@ -1116,8 +1152,7 @@ impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
             let new_max = self.ruleset[search_min..search_max].partition_point(|x| {
                 x.string
                     .chars()
-                    .skip(index)
-                    .next()
+                    .nth(index)
                     .map_or(false, |x| x <= character)
             }) + search_min;
 
@@ -1158,7 +1193,7 @@ impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
         self.buffer = self.buffer.get(1..).unwrap_or(&[]);
 
         // return the result
-        result.map(|x| *x)
+        result.copied()
     }
 }
 
