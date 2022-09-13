@@ -524,34 +524,30 @@ impl<T: Iterator<Item = SynthesisElem>> Iterator for Synthesize<T> {
             self.phase -= 1.0;
         }
 
-        // generate some noise
-        let noise = random_f32(&mut self.seed);
-
         // [-1, 1] range
-        let normalized_noise = Array::splat(noise);
-
-        // [0, 1] range
-        let unit_noise = Array::splat(noise * 0.5 + 0.5);
+        let noise = Array::splat(random_f32(&mut self.seed));
 
         // apply turbulence and noise
-        let turbulence_wave = (saw_wave * (Array::splat(1.0) - unit_noise * elem.formant_turb))
-            .blend_multiple(normalized_noise, elem.formant_breath);
+        let noise_wave = saw_wave.blend_multiple(noise, elem.formant_breath);
 
         // get the filter alpha
         // we can the parameter for the filter from the cutoff frequency with exp(-2*pi*x), which is exp_approx!
         let alpha = elem.formant_smooth.exp_approx();
 
         // apply a low pass filter, single pole
-        self.filter_state_a +=
-            (Array::splat(1.0) - alpha) * (turbulence_wave - self.filter_state_a);
+        self.filter_state_a += (Array::splat(1.0) - alpha) * (noise_wave - self.filter_state_a);
 
         // get the result from the filter
         let glottal_wave = self.filter_state_a;
 
+        // apply turbulence noise
+        let turbulence_wave =
+            glottal_wave * Array::splat(1.0).blend_multiple(noise, elem.formant_turb);
+
         // apply amplitude and scale it
         // makes sure it's the right amplitude to not make the filter go out of the [-1, 1] range
         // TODO: how
-        let v0 = glottal_wave * elem.formant_amp;
+        let v0 = turbulence_wave * elem.formant_amp;
 
         // state variable filter
         // https://cytomic.com/files/dsp/SvfLinearTrapOptimised2.pdf
@@ -626,7 +622,7 @@ fn synthesize_resampled() {}
 // then generates the phoneme enum and storage and it's functions
 macro_rules! make_phonemes {
     ($($upper:ident $lower:ident $example:ident,)*) => {
-        
+
         /// Represents all phonemes.
         /// This is a subset of the IPA,
         /// with a few extra special phonemes to help with properly converting the sounds represented in grail to actual sounds
@@ -637,12 +633,12 @@ macro_rules! make_phonemes {
             /// Silence, will fade in/fade out any other phonemes surrounding it
             /// use when silence is intended
             Silence,
-            
-            /// glottal stop, behaves similarly to silence, 
+
+            /// glottal stop, behaves similarly to silence,
             /// but should be used when a glottal stop is intended.
             /// This is required for some phonemes to sound correct
             Stop,
-            
+
             /// Blend the next phoneme into the other seamlessly, useful for indicating diphthongs
             Glide,
             // insert all uppercase phonemes into the enum, with the examples as in the documentation
@@ -689,9 +685,9 @@ macro_rules! make_phonemes {
 // TODO!
 make_phonemes!(
     A a test,
-    E e test,  
+    E e test,
 );
-  
+
 // and next, the full voice
 // which is just the voice storage + extra parameters for intonation
 
@@ -1141,12 +1137,9 @@ impl<'a, T: Iterator<Item = char>> Iterator for Transcriber<'a, T> {
             // this is binary search, where the left half is where the lower range is lexiographically lower than the current buffer content
             // because we only get one char at a time, we can assume that the previous N characters were already found and reduced the range
             // so no need to keep those around anymore
-            let new_min = self.ruleset[search_min..search_max].partition_point(|x| {
-                x.string
-                    .chars()
-                    .nth(index)
-                    .map_or(true, |x| x < character)
-            }) + search_min;
+            let new_min = self.ruleset[search_min..search_max]
+                .partition_point(|x| x.string.chars().nth(index).map_or(true, |x| x < character))
+                + search_min;
 
             // same for the upper range, but now it's lower or equal
             let new_max = self.ruleset[search_min..search_max].partition_point(|x| {
