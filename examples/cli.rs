@@ -29,61 +29,39 @@ fn save_wav(path: &str, data: &[f32], sample_rate: u32) {
     // open a file
     let mut file = std::fs::File::create(path).expect("Failed to create file");
 
-    // write the header
-    // riff
-    file.write(b"RIFF").expect("Failed to write");
+    // create a wav file
+    let bytes = &[
+        &b"RIFF"[..],                                      // riff header
+        &((36 + data.len() * 2) as u32).to_le_bytes()[..], // file size
+        &b"WAVE"[..],                                      // wave header
+        &b"fmt "[..],                                      // format
+        &(16 as u32).to_le_bytes()[..], // sub chunk size, aka how long is this chunk
+        &(1 as u16).to_le_bytes()[..],  // format, pcm
+        &(1 as u16).to_le_bytes()[..],  // 1 channel
+        &(sample_rate as u32).to_le_bytes()[..], // sample rate
+        &(sample_rate as u32 * 2).to_le_bytes()[..], // byte rate (sample rate * channels * bytes per sample)
+        &(2 as u16).to_le_bytes()[..],               // block align, num channels * bytes per sample
+        &(16 as u16).to_le_bytes()[..],              // bits per sample
+        &b"data"[..],                                // data header
+        &(data.len() as u32 * 2).to_le_bytes()[..],  // section size
+        &data.iter()
+            .map(|x| {
+                ((x * std::i16::MAX as f32) as i16)
+                    .to_le_bytes()
+                    .into_iter()
+            })
+            .flatten()
+            .collect::<Vec<u8>>()[..],
+    ]
+    .iter()
+    .map(|x| *x)
+    .flatten()
+    .map(|x| *x)
+    .collect::<Vec<u8>>();
 
-    // file size, or sub chunk 2 size + 36
-    file.write(&((36 + data.len() * 2) as i32).to_le_bytes())
-        .expect("Failed to write");
-
-    // wave header
-    file.write(b"WAVE").expect("Failed to write");
-
-    // format
-    file.write(b"fmt ").expect("Failed to write");
-
-    // sub chunk size
-    file.write(&(16 as i32).to_le_bytes())
-        .expect("Failed to write");
-
-    // format, just 1 as we want pcm
-    file.write(&(1 as i16).to_le_bytes())
-        .expect("Failed to write");
-
-    // 1 channel
-    file.write(&(1 as i16).to_le_bytes())
-        .expect("Failed to write");
-
-    // sample rate
-    file.write(&(sample_rate as i32).to_le_bytes())
-        .expect("Failed to write");
-
-    // byte rate, sample rate * num channels * bytes per sample
-    file.write(&(sample_rate as i32 * 2).to_le_bytes())
-        .expect("Failed to write");
-
-    // block align, num channels * bytes per sample
-    file.write(&(2 as i16).to_le_bytes())
-        .expect("Failed to write");
-
-    // bits per sample
-    file.write(&(16 as i16).to_le_bytes())
-        .expect("Failed to write");
-
-    // data
-    file.write(b"data").expect("Failed to write");
-
-    // sub chunk size, num samples * num channels * bytes per sample
-    file.write(&(data.len() as i32 * 2).to_le_bytes())
-        .expect("Failed to write");
-
-    // and write the actual sound data
-    for i in data.iter().map(|x| (x * i16::MAX as f32) as i16) {
-        // write the sample
-        file.write(&i.to_le_bytes()).expect("Failed to write");
-    }
-
+    // write file
+    file.write(&bytes).expect("failed to store");
+    
     // and store
     file.flush().expect("Failed to write");
 }
